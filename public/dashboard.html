@@ -1,43 +1,347 @@
 <!DOCTYPE html>
 <html>
-<body style="text-align:center;margin-top:100px;font-family:Arial">
+<head>
+<title>Statement Portal</title>
 
-<h2>Login</h2>
+<style>
+body{
+  font-family: Arial;
+  margin:20px;
+  background:#f5f7fa;
+}
 
-<select id="type">
-  <option value="user">User</option>
-  <option value="admin">Admin</option>
-</select><br><br>
+h2{
+  text-align:center;
+}
 
-<input id="email" placeholder="Email"><br><br>
-<input id="username" placeholder="Admin Username"><br><br>
-<input id="password" type="password" placeholder="Password"><br><br>
+/* CARDS */
+.cards{
+  display:flex;
+  gap:15px;
+  margin-bottom:20px;
+}
 
-<button onclick="login()">Login</button>
+.card{
+  flex:1;
+  background:white;
+  padding:15px;
+  border-radius:10px;
+  box-shadow:0 2px 8px rgba(0,0,0,0.1);
+  text-align:center;
+  cursor:pointer;
+}
+
+.card b{
+  font-size:22px;
+  color:#007bff;
+}
+
+/* TABLE */
+table{
+  width:100%;
+  border-collapse:collapse;
+  background:white;
+}
+
+th,td{
+  border:1px solid #ddd;
+  padding:8px;
+}
+
+th{
+  background:#007bff;
+  color:white;
+}
+
+input{
+  padding:5px;
+  width:95%;
+}
+
+button{
+  padding:5px 10px;
+  margin:2px;
+  background:#007bff;
+  color:white;
+  border:none;
+  cursor:pointer;
+}
+</style>
+</head>
+
+<body>
+
+<h2>Statement Portal</h2>
+
+<!-- ADMIN OPTIONS -->
+<div id="adminPanel">
+  <input type="file" id="file">
+  <button onclick="upload()">Upload Excel</button>
+  <button onclick="downloadReport()">Download Report</button>
+  <button onclick="downloadAll()">Download Files</button>
+</div>
+
+<button onclick="downloadPending()">Download Pending</button>
+
+<br><br>
+
+<!-- CARDS -->
+<div class="cards">
+  <div class="card" onclick="applyCardFilter('total')" id="totalCard"></div>
+  <div class="card" onclick="applyCardFilter('sssReceived')" id="sssCard"></div>
+  <div class="card" onclick="applyCardFilter('sssPending')" id="sssPendingCard"></div>
+  <div class="card" onclick="applyCardFilter('awsReceived')" id="awsCard"></div>
+  <div class="card" onclick="applyCardFilter('awsPending')" id="awsPendingCard"></div>
+</div>
+
+<!-- TABLE -->
+<table>
+
+<thead>
+<tr>
+  <th>State</th>
+  <th>BM HQ</th>
+  <th>Code</th>
+  <th>Stockist Name</th>
+  <th>Value</th>
+  <th>SSS</th>
+  <th>AWS</th>
+</tr>
+
+<tr>
+  <td><input onkeyup="filterTable()"></td>
+  <td><input onkeyup="filterTable()"></td>
+  <td><input onkeyup="filterTable()"></td>
+  <td><input onkeyup="filterTable()"></td>
+  <td></td><td></td><td></td>
+</tr>
+</thead>
+
+<tbody id="body"></tbody>
+
+</table>
 
 <script>
-async function login(){
 
-  let type = document.getElementById("type").value;
+let allData = [];
+let role = "";
+let currentFilter = "total";
 
-  let body = type==="user"
-    ? {type,email:email.value}
-    : {type,username:username.value,password:password.value};
+// ===== LOAD =====
+async function load(){
 
-  let res = await fetch('/login',{
+  let res = await fetch('/getData');
+  let result = await res.json();
+
+  role = result.role;
+  allData = result.data;
+
+  if(role === "user"){
+    document.getElementById("adminPanel").style.display="none";
+  }
+
+  render(allData);
+  loadDashboard();
+}
+
+// ===== DASHBOARD =====
+async function loadDashboard(){
+
+  let res = await fetch('/dashboard');
+  let d = await res.json();
+
+  totalCard.innerHTML = `Total<br><b>${d.total}</b>`;
+  sssCard.innerHTML = `SSS Received<br><b>${d.sssReceived}</b><br>${d.sssReceivedPercent}%`;
+  sssPendingCard.innerHTML = `SSS Pending<br><b>${d.sssPending}</b><br>${d.sssPendingPercent}%`;
+  awsCard.innerHTML = `AWS Received<br><b>${d.awsReceived}</b><br>${d.awsReceivedPercent}%`;
+  awsPendingCard.innerHTML = `AWS Pending<br><b>${d.awsPending}</b><br>${d.awsPendingPercent}%`;
+}
+
+// ===== RENDER =====
+function render(data){
+
+  let body = document.getElementById("body");
+  body.innerHTML = "";
+
+  data.forEach(r => {
+
+    let tr = document.createElement("tr");
+
+    tr.innerHTML = `
+      <td>${r.STATE}</td>
+      <td>${r.BM_HQ}</td>
+      <td>${r.Code}</td>
+      <td>${r.Name}</td>
+
+      <td>
+        <input value="${r.Value || ""}" 
+        onchange="saveValue('${r.Code}',this.value)">
+      </td>
+
+      <!-- SSS -->
+      <td>
+        ${
+          r.SSS
+          ? `
+            <button onclick="viewFile('${r.Code}','SSS')">View</button>
+            ${role==="admin" ? `<button onclick="deleteFile('${r.Code}','SSS')">Delete</button>` : ""}
+            <br><small>${r.SSS_Submitted_By || ""}</small>
+            <br><small>${r.SSS_Date || ""}</small>
+          `
+          : `
+            <input type="file" onchange="selectFile(this,'${r.Code}','SSS')">
+            <div id="sss_${r.Code}"></div>
+          `
+        }
+      </td>
+
+      <!-- AWS -->
+      <td>
+        ${
+          r.AWS
+          ? `
+            <button onclick="viewFile('${r.Code}','AWS')">View</button>
+            ${role==="admin" ? `<button onclick="deleteFile('${r.Code}','AWS')">Delete</button>` : ""}
+            <br><small>${r.AWS_Submitted_By || ""}</small>
+            <br><small>${r.AWS_Date || ""}</small>
+          `
+          : `
+            <input type="file" onchange="selectFile(this,'${r.Code}','AWS')">
+            <div id="aws_${r.Code}"></div>
+          `
+        }
+      </td>
+    `;
+
+    body.appendChild(tr);
+  });
+}
+
+// ===== FILTER =====
+function filterTable(){
+
+  let inputs = document.querySelectorAll("thead input");
+
+  let filtered = allData.filter(r =>
+    (r.STATE || "").toLowerCase().includes(inputs[0].value.toLowerCase()) &&
+    (r.BM_HQ || "").toLowerCase().includes(inputs[1].value.toLowerCase()) &&
+    (r.Code || "").toLowerCase().includes(inputs[2].value.toLowerCase()) &&
+    (r.Name || "").toLowerCase().includes(inputs[3].value.toLowerCase())
+  );
+
+  applyFilter(filtered);
+}
+
+function applyCardFilter(type){
+  currentFilter = type;
+  applyFilter(allData);
+}
+
+function applyFilter(data){
+
+  let filtered = [...data];
+
+  if(currentFilter==="sssReceived") filtered = filtered.filter(r=>r.SSS);
+  if(currentFilter==="sssPending") filtered = filtered.filter(r=>!r.SSS);
+  if(currentFilter==="awsReceived") filtered = filtered.filter(r=>r.AWS);
+  if(currentFilter==="awsPending") filtered = filtered.filter(r=>!r.AWS);
+
+  render(filtered);
+}
+
+// ===== SAVE VALUE =====
+async function saveValue(code,value){
+  await fetch('/saveValue',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(body)
+    body:JSON.stringify({code,value})
+  });
+}
+
+// ===== FILE FLOW =====
+function selectFile(input, code, type){
+
+  let file = input.files[0];
+  let div = document.getElementById(`${type.toLowerCase()}_${code}`);
+
+  div.file = file;
+
+  div.innerHTML = `
+    <button onclick="preview('${type}','${code}')">View</button>
+    <button onclick="uploadFile('${type}','${code}')">Upload</button>
+  `;
+}
+
+function preview(type, code){
+  let file = document.getElementById(`${type.toLowerCase()}_${code}`).file;
+  window.open(URL.createObjectURL(file));
+}
+
+async function uploadFile(type, code){
+
+  let file = document.getElementById(`${type.toLowerCase()}_${code}`).file;
+
+  let form = new FormData();
+  form.append("file", file);
+  form.append("code", code);
+  form.append("type", type);
+
+  let res = await fetch('/uploadFile',{ method:'POST', body:form });
+  alert(await res.text());
+
+  load();
+}
+
+// ===== VIEW / DELETE =====
+function viewFile(code,type){
+  window.open(`/viewFile?code=${code}&type=${type}`);
+}
+
+async function deleteFile(code,type){
+  if(!confirm("Delete?")) return;
+
+  await fetch('/deleteFile',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({code,type})
   });
 
-  let msg = await res.text();
-
-  if(msg==="success"){
-    location="dashboard.html";
-  }else{
-    alert("Login failed");
-  }
+  load();
 }
+
+// ===== DOWNLOAD =====
+function downloadReport(){
+  window.open('/downloadReport');
+}
+
+function downloadAll(){
+  window.open('/downloadAllFiles');
+}
+
+function downloadPending(){
+  window.open('/downloadPending');
+}
+
+// ===== EXCEL UPLOAD =====
+async function upload(){
+
+  let file = document.getElementById("file").files[0];
+
+  let form = new FormData();
+  form.append("file", file);
+
+  await fetch('/uploadExcel',{
+    method:'POST',
+    body:form
+  });
+
+  alert("Uploaded");
+  load();
+}
+
+// INIT
+load();
+
 </script>
 
 </body>
