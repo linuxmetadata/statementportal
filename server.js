@@ -19,7 +19,7 @@ app.use(session({
   saveUninitialized: true
 }));
 
-// ===== ROOT FIX (IMPORTANT) =====
+// ===== ROOT =====
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
@@ -30,7 +30,7 @@ const PORT = process.env.PORT || 3000;
 // ===== STORAGE =====
 const upload = multer({ dest: 'uploads/' });
 
-// ===== DATA FUNCTIONS =====
+// ===== DATA =====
 function readData() {
   try {
     if (!fs.existsSync('data.json')) return [];
@@ -42,6 +42,14 @@ function readData() {
 
 function writeData(data) {
   fs.writeFileSync('data.json', JSON.stringify(data, null, 2));
+}
+
+// ===== FLEXIBLE COLUMN GET =====
+function getVal(row, keys){
+  for(let k of keys){
+    if(row[k]) return row[k];
+  }
+  return "";
 }
 
 // ===== EMAIL MATCH =====
@@ -98,16 +106,16 @@ app.post('/uploadExcel', upload.single('file'), (req, res) => {
     let data = XLSX.utils.sheet_to_json(sheet);
 
     data = data.map(row => ({
-      BH_Email: row["BH_Email"] || "",
-      SM_Email: row["SM_Email"] || "",
-      ZBM_Email: row["ZBM_Email"] || "",
-      RBM_Email: row["RBM_Email"] || "",
-      ABM_Email: row["ABM_Email"] || "",
+      BH_Email: getVal(row, ["BH_Email"]),
+      SM_Email: getVal(row, ["SM_Email"]),
+      ZBM_Email: getVal(row, ["ZBM_Email"]),
+      RBM_Email: getVal(row, ["RBM_Email"]),
+      ABM_Email: getVal(row, ["ABM_Email"]),
 
-      STATE: row["STATE"] || "",
-      BM_HQ: row["BM HQ"] || row["BM_HQ"] || "",
-      Code: row["Code"] || row["CODE"] || "",
-      Name: row["Stockist Name"] || row["STOCKIST NAME"] || "",
+      STATE: getVal(row, ["STATE","State"]),
+      BM_HQ: getVal(row, ["BM HQ","BM_HQ"]),
+      Code: getVal(row, ["Stockist Code","STOCKIST CODE","Code","CODE"]),
+      Name: getVal(row, ["Stockist Name","STOCKIST NAME","Name"]),
 
       Value: "",
 
@@ -180,7 +188,7 @@ app.post('/uploadFile', upload.single('file'), async (req, res) => {
 
     if (!file) return res.send("No file");
 
-    const allowed = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.txt', '.html'];
+    const allowed = ['.pdf','.doc','.docx','.xls','.xlsx','.txt','.html'];
     const ext = path.extname(file.originalname).toLowerCase();
 
     if (!allowed.includes(ext)) {
@@ -331,7 +339,34 @@ app.get('/downloadReport', (req, res) => {
   res.download(file);
 });
 
-// ===== DOWNLOAD ZIP =====
+// ===== DOWNLOAD PENDING =====
+app.get('/downloadPending', (req, res) => {
+
+  if (!req.session.user) {
+    return res.send("Login required");
+  }
+
+  let data = readData();
+
+  if (req.session.user.role === "user") {
+    let email = req.session.user.email;
+    data = data.filter(r => emailMatch(r, email));
+  }
+
+  data = data.filter(r => !r.SSS || !r.AWS);
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(data);
+
+  XLSX.utils.book_append_sheet(wb, ws, "Pending");
+
+  const file = "pending.xlsx";
+  XLSX.writeFile(wb, file);
+
+  res.download(file);
+});
+
+// ===== DOWNLOAD ALL FILES =====
 app.get('/downloadAllFiles', (req, res) => {
 
   if (!req.session.user || req.session.user.role !== "admin") {
