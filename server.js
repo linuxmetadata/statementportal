@@ -106,7 +106,7 @@ app.post('/uploadExcel', upload.single('file'), (req, res) => {
 
       STATE: row["STATE"] || "",
       BM_HQ: row["BM HQ"] || row["BM_HQ"] || "",
-      Code: row["Stockist Code"] || row["CODE"] || "",
+      Code: row["Code"] || row["CODE"] || "",
       Name: row["Stockist Name"] || row["STOCKIST NAME"] || "",
 
       Value: "",
