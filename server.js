@@ -18,13 +18,18 @@ app.use(session({
   saveUninitialized: true
 }));
 
-// ===== PORT FIX (IMPORTANT FOR RENDER) =====
+// ✅ FIX: ROOT ROUTE (VERY IMPORTANT)
+app.get('/', (req,res)=>{
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+// ===== PORT =====
 const PORT = process.env.PORT || 3000;
 
 // ===== STORAGE =====
 const upload = multer({ dest: 'uploads/' });
 
-// ===== DATA FUNCTIONS =====
+// ===== DATA =====
 function readData(){
   try{
     if(!fs.existsSync('data.json')) return [];
@@ -66,7 +71,6 @@ app.post('/login', (req,res)=>{
 
   if(type === "user"){
     let data = readData();
-
     const exists = data.some(r => emailMatch(r, email));
 
     if(!exists) return res.send("fail");
@@ -119,8 +123,7 @@ app.post('/uploadExcel', upload.single('file'), (req,res)=>{
     }));
 
     writeData(data);
-
-    fs.unlinkSync(req.file.path); // cleanup temp file
+    fs.unlinkSync(req.file.path);
 
     res.send("uploaded");
 
@@ -183,7 +186,6 @@ app.post('/uploadFile', upload.single('file'), async (req,res)=>{
       return res.send("Invalid format");
     }
 
-    // PDF validation
     if(ext === '.pdf'){
       const buffer = fs.readFileSync(file.path);
       const parsed = await pdfParse(buffer);
