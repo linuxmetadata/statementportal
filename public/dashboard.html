@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<body style="text-align:center;margin-top:100px;font-family:Arial">
+
+<h2>Login</h2>
+
+<select id="type">
+  <option value="user">User</option>
+  <option value="admin">Admin</option>
+</select><br><br>
+
+<input id="email" placeholder="Email"><br><br>
+<input id="username" placeholder="Admin Username"><br><br>
+<input id="password" type="password" placeholder="Password"><br><br>
+
+<button onclick="login()">Login</button>
+
+<script>
+async function login(){
+
+  let type = document.getElementById("type").value;
+
+  let body = type==="user"
+    ? {type,email:email.value}
+    : {type,username:username.value,password:password.value};
+
+  let res = await fetch('/login',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body)
+  });
+
+  let msg = await res.text();
+
+  if(msg==="success"){
+    location="dashboard.html";
+  }else{
+    alert("Login failed");
+  }
+}
+</script>
+
+</body>
+</html>
