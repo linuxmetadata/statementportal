@@ -9,6 +9,7 @@ const archiver = require('archiver');
 
 const app = express();
 
+// ===== MIDDLEWARE =====
 app.use(express.static('public'));
 app.use(express.json());
 
@@ -18,8 +19,8 @@ app.use(session({
   saveUninitialized: true
 }));
 
-// ✅ FIX: ROOT ROUTE (VERY IMPORTANT)
-app.get('/', (req,res)=>{
+// ===== ROOT FIX (IMPORTANT) =====
+app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
@@ -29,22 +30,22 @@ const PORT = process.env.PORT || 3000;
 // ===== STORAGE =====
 const upload = multer({ dest: 'uploads/' });
 
-// ===== DATA =====
-function readData(){
-  try{
-    if(!fs.existsSync('data.json')) return [];
+// ===== DATA FUNCTIONS =====
+function readData() {
+  try {
+    if (!fs.existsSync('data.json')) return [];
     return JSON.parse(fs.readFileSync('data.json'));
-  }catch{
+  } catch {
     return [];
   }
 }
 
-function writeData(data){
+function writeData(data) {
   fs.writeFileSync('data.json', JSON.stringify(data, null, 2));
 }
 
 // ===== EMAIL MATCH =====
-function emailMatch(row, email){
+function emailMatch(row, email) {
   email = (email || "").toLowerCase();
 
   return [
@@ -57,25 +58,26 @@ function emailMatch(row, email){
 }
 
 // ===== LOGIN =====
-app.post('/login', (req,res)=>{
+app.post('/login', (req, res) => {
 
   const { type, email, username, password } = req.body;
 
-  if(type === "admin"){
-    if(username === "admin" && password === "admin123"){
-      req.session.user = { role:"admin" };
+  if (type === "admin") {
+    if (username === "admin" && password === "admin123") {
+      req.session.user = { role: "admin" };
       return res.send("success");
     }
     return res.send("fail");
   }
 
-  if(type === "user"){
+  if (type === "user") {
     let data = readData();
+
     const exists = data.some(r => emailMatch(r, email));
 
-    if(!exists) return res.send("fail");
+    if (!exists) return res.send("fail");
 
-    req.session.user = { role:"user", email };
+    req.session.user = { role: "user", email };
     return res.send("success");
   }
 
@@ -83,13 +85,13 @@ app.post('/login', (req,res)=>{
 });
 
 // ===== UPLOAD EXCEL =====
-app.post('/uploadExcel', upload.single('file'), (req,res)=>{
+app.post('/uploadExcel', upload.single('file'), (req, res) => {
 
-  if(!req.session.user || req.session.user.role !== "admin"){
+  if (!req.session.user || req.session.user.role !== "admin") {
     return res.send("Access denied");
   }
 
-  try{
+  try {
 
     const wb = XLSX.readFile(req.file.path);
     const sheet = wb.Sheets[wb.SheetNames[0]];
@@ -127,38 +129,38 @@ app.post('/uploadExcel', upload.single('file'), (req,res)=>{
 
     res.send("uploaded");
 
-  }catch(err){
+  } catch (err) {
     console.log(err);
     res.send("error uploading excel");
   }
 });
 
 // ===== GET DATA =====
-app.get('/getData',(req,res)=>{
+app.get('/getData', (req, res) => {
 
-  if(!req.session.user) return res.json([]);
+  if (!req.session.user) return res.json([]);
 
   let data = readData();
 
-  if(req.session.user.role === "admin"){
-    return res.json({ role:"admin", data });
+  if (req.session.user.role === "admin") {
+    return res.json({ role: "admin", data });
   }
 
   let email = req.session.user.email;
   let filtered = data.filter(r => emailMatch(r, email));
 
-  res.json({ role:"user", data: filtered });
+  res.json({ role: "user", data: filtered });
 });
 
 // ===== SAVE VALUE =====
-app.post('/saveValue', (req,res)=>{
+app.post('/saveValue', (req, res) => {
 
   const { code, value } = req.body;
 
   let data = readData();
 
   data.forEach(r => {
-    if(r.Code == code){
+    if (r.Code == code) {
       r.Value = value;
     }
   });
@@ -169,28 +171,28 @@ app.post('/saveValue', (req,res)=>{
 });
 
 // ===== FILE UPLOAD =====
-app.post('/uploadFile', upload.single('file'), async (req,res)=>{
+app.post('/uploadFile', upload.single('file'), async (req, res) => {
 
-  try{
+  try {
 
     const { code, type } = req.body;
     const file = req.file;
 
-    if(!file) return res.send("No file");
+    if (!file) return res.send("No file");
 
-    const allowed = ['.pdf','.doc','.docx','.xls','.xlsx','.txt','.html'];
+    const allowed = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.txt', '.html'];
     const ext = path.extname(file.originalname).toLowerCase();
 
-    if(!allowed.includes(ext)){
+    if (!allowed.includes(ext)) {
       fs.unlinkSync(file.path);
       return res.send("Invalid format");
     }
 
-    if(ext === '.pdf'){
+    if (ext === '.pdf') {
       const buffer = fs.readFileSync(file.path);
       const parsed = await pdfParse(buffer);
 
-      if(!parsed.text || parsed.text.trim().length < 10){
+      if (!parsed.text || parsed.text.trim().length < 10) {
         fs.unlinkSync(file.path);
         return res.send("Invalid PDF");
       }
@@ -199,7 +201,7 @@ app.post('/uploadFile', upload.single('file'), async (req,res)=>{
     let data = readData();
     let row = data.find(r => r.Code == code);
 
-    if(!row || !row.Value){
+    if (!row || !row.Value) {
       fs.unlinkSync(file.path);
       return res.send("Enter Value first");
     }
@@ -207,9 +209,9 @@ app.post('/uploadFile', upload.single('file'), async (req,res)=>{
     const state = row.STATE || "UNKNOWN";
     const folder = path.join('uploads', state, type);
 
-    fs.mkdirSync(folder, { recursive:true });
+    fs.mkdirSync(folder, { recursive: true });
 
-    const cleanName = (row.Name || "FILE").replace(/[^a-zA-Z0-9]/g,"_");
+    const cleanName = (row.Name || "FILE").replace(/[^a-zA-Z0-9]/g, "_");
     const newName = `${cleanName}_${code}_${type}${ext}`;
     const newPath = path.join(folder, newName);
 
@@ -224,25 +226,25 @@ app.post('/uploadFile', upload.single('file'), async (req,res)=>{
 
     res.send("uploaded");
 
-  }catch(err){
+  } catch (err) {
     console.log(err);
     res.send("error");
   }
 });
 
 // ===== VIEW FILE =====
-app.get('/viewFile', (req,res)=>{
+app.get('/viewFile', (req, res) => {
 
   const { code, type } = req.query;
 
   let data = readData();
   let row = data.find(r => r.Code == code);
 
-  if(!row) return res.send("Not found");
+  if (!row) return res.send("Not found");
 
   let filePath = row[`${type}_File`];
 
-  if(!filePath || !fs.existsSync(filePath)){
+  if (!filePath || !fs.existsSync(filePath)) {
     return res.send("File not found");
   }
 
@@ -250,9 +252,9 @@ app.get('/viewFile', (req,res)=>{
 });
 
 // ===== DELETE FILE =====
-app.post('/deleteFile', (req,res)=>{
+app.post('/deleteFile', (req, res) => {
 
-  if(!req.session.user || req.session.user.role !== "admin"){
+  if (!req.session.user || req.session.user.role !== "admin") {
     return res.send("Access denied");
   }
 
@@ -261,11 +263,11 @@ app.post('/deleteFile', (req,res)=>{
   let data = readData();
   let row = data.find(r => r.Code == code);
 
-  if(!row) return res.send("Not found");
+  if (!row) return res.send("Not found");
 
   let filePath = row[`${type}_File`];
 
-  if(filePath && fs.existsSync(filePath)){
+  if (filePath && fs.existsSync(filePath)) {
     fs.unlinkSync(filePath);
   }
 
@@ -278,13 +280,13 @@ app.post('/deleteFile', (req,res)=>{
 });
 
 // ===== DASHBOARD =====
-app.get('/dashboard', (req,res)=>{
+app.get('/dashboard', (req, res) => {
 
-  if(!req.session.user) return res.json({});
+  if (!req.session.user) return res.json({});
 
   let data = readData();
 
-  if(req.session.user.role === "user"){
+  if (req.session.user.role === "user") {
     let email = req.session.user.email;
     data = data.filter(r => emailMatch(r, email));
   }
@@ -296,7 +298,7 @@ app.get('/dashboard', (req,res)=>{
   const sssPending = total - sssReceived;
   const awsPending = total - awsReceived;
 
-  function percent(val){
+  function percent(val) {
     return total === 0 ? 0 : ((val / total) * 100).toFixed(1);
   }
 
@@ -314,7 +316,7 @@ app.get('/dashboard', (req,res)=>{
 });
 
 // ===== DOWNLOAD REPORT =====
-app.get('/downloadReport', (req,res)=>{
+app.get('/downloadReport', (req, res) => {
 
   let data = readData();
 
@@ -330,9 +332,9 @@ app.get('/downloadReport', (req,res)=>{
 });
 
 // ===== DOWNLOAD ZIP =====
-app.get('/downloadAllFiles', (req,res)=>{
+app.get('/downloadAllFiles', (req, res) => {
 
-  if(!req.session.user || req.session.user.role !== "admin"){
+  if (!req.session.user || req.session.user.role !== "admin") {
     return res.send("Access denied");
   }
 
@@ -341,7 +343,7 @@ app.get('/downloadAllFiles', (req,res)=>{
   res.attachment('All_Files.zip');
   archive.pipe(res);
 
-  if(fs.existsSync('uploads')){
+  if (fs.existsSync('uploads')) {
     archive.directory('uploads', false);
   }
 
@@ -349,6 +351,6 @@ app.get('/downloadAllFiles', (req,res)=>{
 });
 
 // ===== START SERVER =====
-app.listen(PORT, ()=>{
+app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
