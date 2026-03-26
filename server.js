@@ -5,8 +5,6 @@ const path = require('path');
 const session = require('express-session');
 const multer = require('multer');
 const pdfParse = require('pdf-parse');
-const axios = require('axios');
-const archiver = require('archiver');
 const { google } = require('googleapis');
 
 const app = express();
@@ -25,8 +23,20 @@ app.use(session({
 const upload = multer({ dest: 'uploads/' });
 
 // ================= GOOGLE DRIVE =================
-const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS);
-creds.private_key = creds.private_key.replace(/\\n/g, '\n');
+let creds;
+
+try {
+  if (!process.env.GOOGLE_CREDENTIALS) {
+    throw new Error("Missing GOOGLE_CREDENTIALS");
+  }
+
+  creds = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+  creds.private_key = creds.private_key.replace(/\\n/g, '\n');
+
+} catch (err) {
+  console.log("❌ GOOGLE_CREDENTIALS ERROR:", err.message);
+  process.exit(1);
+}
 
 const auth = new google.auth.GoogleAuth({
   credentials: creds,
@@ -40,8 +50,21 @@ const FOLDER_ID = '168KzEusKlXsHQ-votUNTNA9g0VIai4X-';
 let DATA = [];
 let saved = [];
 
+// ✅ SAFE LOAD data.json
 if (fs.existsSync('data.json')) {
-  saved = JSON.parse(fs.readFileSync('data.json'));
+  try {
+    const content = fs.readFileSync('data.json', 'utf8');
+
+    if (content.trim()) {
+      saved = JSON.parse(content);
+    } else {
+      saved = [];
+    }
+
+  } catch (err) {
+    console.log("❌ data.json corrupted, resetting...");
+    saved = [];
+  }
 }
 
 // ================= SAVE =================
@@ -101,14 +124,14 @@ async function loadExcel() {
         Code: r["Code"] || "",
         Name: r["Stockist Name"] || "",
 
-        // ✅ EMAILS (FIXED)
+        // ✅ EMAIL FILTER FIX
         BH_Email: r["BH_Email"] || "",
         SM_Email: r["SM_Email"] || "",
         ZBM_Email: r["ZBM_Email"] || "",
         RBM_Email: r["RBM_Email"] || "",
         ABM_Email: r["ABM_Email"] || "",
 
-        // ✅ MERGED DATA
+        // ✅ PERSISTED DATA
         Value: old.Value || "",
 
         SSS: old.SSS || false,
@@ -135,7 +158,7 @@ async function loadExcel() {
   }
 }
 
-// ================= AUTH =================
+// ================= LOGIN =================
 app.post('/login', (req, res) => {
 
   const { type, email, username, password } = req.body;
@@ -155,7 +178,9 @@ app.post('/login', (req, res) => {
 // ================= GET DATA =================
 app.get('/getData', (req, res) => {
 
-  if (!req.session.user) return res.json({ role: "", data: [] });
+  if (!req.session.user) {
+    return res.json({ role: "", data: [] });
+  }
 
   let result = DATA;
 
@@ -198,7 +223,6 @@ app.post('/uploadFile', upload.single('file'), async (req, res) => {
 
     let row = DATA.find(r => r.Code == code);
 
-    // ✅ VALUE CHECK
     if (!row.Value || row.Value.trim() === "") {
       fs.unlinkSync(file.path);
       return res.json({ status: "error", msg: "Enter Value first" });
@@ -212,7 +236,6 @@ app.post('/uploadFile', upload.single('file'), async (req, res) => {
       return res.json({ status: "error", msg: "Invalid format" });
     }
 
-    // ✅ PDF VALIDATION
     if (ext === '.pdf') {
       const parsed = await pdfParse(fs.readFileSync(file.path));
       if (!parsed.text || parsed.text.trim().length < 10) {
@@ -243,7 +266,6 @@ app.post('/uploadFile', upload.single('file'), async (req, res) => {
 
     fs.unlinkSync(file.path);
 
-    // ✅ UPDATE DATA
     row[type] = true;
     row[`${type}_File`] = link;
     row[`${type}_Submitted_By`] = req.session.user.email || "admin";
@@ -254,7 +276,7 @@ app.post('/uploadFile', upload.single('file'), async (req, res) => {
     res.json({ status: "success" });
 
   } catch (err) {
-    console.log(err);
+    console.log("Upload error:", err.message);
     res.json({ status: "error", msg: "Upload failed" });
   }
 });
