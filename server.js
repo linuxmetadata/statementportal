@@ -23,7 +23,7 @@ app.use(session({
 const upload = multer({ dest: 'uploads/' });
 const PORT = process.env.PORT || 3000;
 
-// ===== GOOGLE AUTH (FIXED) =====
+// ================= GOOGLE AUTH =================
 let auth;
 
 try {
@@ -46,7 +46,12 @@ const FOLDER_ID = '168KzEusKlXsHQ-votUNTNA9g0VIai4X-';
 
 let DATA = [];
 
-// ===== HELPERS =====
+// ================= HOME ROUTE =================
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+// ================= HELPERS =================
 function checkAuth(req,res){
   if(!req.session.user){
     res.send("Login required");
@@ -63,7 +68,7 @@ function cleanKey(obj){
   return o;
 }
 
-// ===== DRIVE =====
+// ================= DRIVE =================
 async function uploadToDrive(filePath,name){
   const res = await drive.files.create({
     requestBody:{ name, parents:[FOLDER_ID] },
@@ -80,64 +85,70 @@ async function getLink(id){
   return `https://drive.google.com/uc?id=${id}`;
 }
 
-// ===== LOAD EXCEL =====
+// ================= LOAD EXCEL =================
 async function loadExcel(){
-  const list = await drive.files.list({
-    q:`'${FOLDER_ID}' in parents and name='MASTER_EXCEL.xlsx'`,
-    fields:'files(id)'
-  });
+  try {
+    const list = await drive.files.list({
+      q:`'${FOLDER_ID}' in parents and name='MASTER_EXCEL.xlsx'`,
+      fields:'files(id)'
+    });
 
-  if(list.data.files.length===0) return;
+    if(list.data.files.length===0) return;
 
-  const fileId = list.data.files[0].id;
+    const fileId = list.data.files[0].id;
 
-  const dest = fs.createWriteStream("temp.xlsx");
+    const dest = fs.createWriteStream("temp.xlsx");
 
-  const res = await drive.files.get(
-    { fileId, alt:'media' },
-    { responseType:'stream' }
-  );
+    const res = await drive.files.get(
+      { fileId, alt:'media' },
+      { responseType:'stream' }
+    );
 
-  await new Promise((resolve,reject)=>{
-    res.data.pipe(dest).on('finish',resolve).on('error',reject);
-  });
+    await new Promise((resolve,reject)=>{
+      res.data.pipe(dest).on('finish',resolve).on('error',reject);
+    });
 
-  const wb = XLSX.readFile("temp.xlsx");
-  const sheet = wb.Sheets[wb.SheetNames[0]];
-  const raw = XLSX.utils.sheet_to_json(sheet);
+    const wb = XLSX.readFile("temp.xlsx");
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const raw = XLSX.utils.sheet_to_json(sheet);
 
-  DATA = raw.map(r=>{
-    let row = cleanKey(r);
-    return {
-      STATE: row["State"] || "",
-      BM_HQ: row["BM HQ"] || "",
-      Code: row["Code"] || "",
-      Name: row["Stockist Name"] || "",
+    DATA = raw.map(r=>{
+      let row = cleanKey(r);
+      return {
+        STATE: row["State"] || "",
+        BM_HQ: row["BM HQ"] || "",
+        Code: row["Code"] || "",
+        Name: row["Stockist Name"] || "",
 
-      BH_Email: row["BH_Email"] || "",
-      SM_Email: row["SM_Email"] || "",
-      ZBM_Email: row["ZBM_Email"] || "",
-      RBM_Email: row["RBM_Email"] || "",
-      ABM_Email: row["ABM_Email"] || "",
+        BH_Email: row["BH_Email"] || "",
+        SM_Email: row["SM_Email"] || "",
+        ZBM_Email: row["ZBM_Email"] || "",
+        RBM_Email: row["RBM_Email"] || "",
+        ABM_Email: row["ABM_Email"] || "",
 
-      Value:"",
-      SSS:false,
-      AWS:false,
+        Value:"",
+        SSS:false,
+        AWS:false,
 
-      SSS_File:"",
-      AWS_File:"",
+        SSS_File:"",
+        AWS_File:"",
 
-      SSS_Submitted_By:"",
-      AWS_Submitted_By:"",
-      SSS_Date:"",
-      AWS_Date:""
-    }
-  });
+        SSS_Submitted_By:"",
+        AWS_Submitted_By:"",
+        SSS_Date:"",
+        AWS_Date:""
+      }
+    });
 
-  fs.unlinkSync("temp.xlsx");
+    fs.unlinkSync("temp.xlsx");
+    console.log("Loaded rows:", DATA.length);
+
+  } catch (err) {
+    console.log("Excel load error:", err.message);
+  }
 }
 
-// ===== LOGIN =====
+// ================= LOGIN =================
 app.post('/login',(req,res)=>{
   const {type,email,username,password} = req.body;
 
@@ -155,7 +166,7 @@ app.post('/login',(req,res)=>{
   }
 });
 
-// ===== UPLOAD EXCEL =====
+// ================= UPLOAD EXCEL =================
 app.post('/uploadExcel', upload.single('file'), async (req,res)=>{
 
   if(!checkAuth(req,res)) return;
@@ -178,7 +189,7 @@ app.post('/uploadExcel', upload.single('file'), async (req,res)=>{
   res.send("Excel uploaded");
 });
 
-// ===== GET DATA =====
+// ================= GET DATA =================
 app.get('/getData',(req,res)=>{
   if(!checkAuth(req,res)) return;
 
@@ -199,7 +210,7 @@ app.get('/getData',(req,res)=>{
   res.json({ role:req.session.user.role, data:result });
 });
 
-// ===== SAVE VALUE =====
+// ================= SAVE VALUE =================
 app.post('/saveValue',(req,res)=>{
   const {code,value} = req.body;
 
@@ -210,7 +221,7 @@ app.post('/saveValue',(req,res)=>{
   res.send("saved");
 });
 
-// ===== UPLOAD FILE =====
+// ================= UPLOAD FILE =================
 app.post('/uploadFile', upload.single('file'), async (req,res)=>{
 
   const {code,type} = req.body;
@@ -257,14 +268,14 @@ app.post('/uploadFile', upload.single('file'), async (req,res)=>{
   res.send("uploaded");
 });
 
-// ===== VIEW =====
+// ================= VIEW =================
 app.get('/viewFile',(req,res)=>{
   const {code,type} = req.query;
   let row = DATA.find(r=>r.Code==code);
   res.redirect(row[`${type}_File`]);
 });
 
-// ===== DELETE =====
+// ================= DELETE =================
 app.post('/deleteFile',(req,res)=>{
   const {code,type} = req.body;
   let row = DATA.find(r=>r.Code==code);
@@ -275,7 +286,7 @@ app.post('/deleteFile',(req,res)=>{
   res.send("deleted");
 });
 
-// ===== DOWNLOAD REPORT =====
+// ================= DOWNLOAD REPORT =================
 app.get('/downloadReport',(req,res)=>{
 
   let report = DATA.map(r=>({
@@ -300,7 +311,7 @@ app.get('/downloadReport',(req,res)=>{
   res.download("report.xlsx");
 });
 
-// ===== DOWNLOAD ALL FILES =====
+// ================= DOWNLOAD ALL FILES =================
 app.get('/downloadAllFiles', async (req,res)=>{
 
   const archive = archiver('zip');
@@ -324,7 +335,7 @@ app.get('/downloadAllFiles', async (req,res)=>{
   archive.finalize();
 });
 
-// ===== DOWNLOAD PENDING =====
+// ================= DOWNLOAD PENDING =================
 app.get('/downloadPending',(req,res)=>{
 
   const wb = XLSX.utils.book_new();
@@ -337,7 +348,7 @@ app.get('/downloadPending',(req,res)=>{
   res.download("pending.xlsx");
 });
 
-// ===== START =====
+// ================= START =================
 app.listen(PORT, async ()=>{
   console.log("Server running...");
   await loadExcel();
