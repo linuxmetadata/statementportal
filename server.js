@@ -61,13 +61,45 @@ function checkAuth(req, res) {
   return true;
 }
 
+// ================= GOOGLE DRIVE UPLOAD =================
+async function uploadToDrive(filePath, name) {
+
+  const res = await drive.files.create({
+    requestBody: {
+      name: name,
+      parents: [FOLDER_ID]
+    },
+    media: {
+      body: fs.createReadStream(filePath)
+    },
+
+    supportsAllDrives: true // ✅ FIX
+  });
+
+  return res.data.id;
+}
+
+// ================= GET PUBLIC LINK =================
+async function getLink(id) {
+  await drive.permissions.create({
+    fileId: id,
+    requestBody: { role: 'reader', type: 'anyone' },
+    supportsAllDrives: true
+  });
+
+  return `https://drive.google.com/uc?id=${id}`;
+}
+
 // ================= LOAD EXCEL =================
 async function loadExcel() {
   try {
 
     const list = await drive.files.list({
       q: `'${FOLDER_ID}' in parents and name='MASTER_EXCEL.xlsx'`,
-      fields: 'files(id)'
+      fields: 'files(id)',
+
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true
     });
 
     if (list.data.files.length === 0) {
@@ -80,8 +112,14 @@ async function loadExcel() {
     const dest = fs.createWriteStream("temp.xlsx");
 
     const res = await drive.files.get(
-      { fileId, alt: 'media' },
-      { responseType: 'stream' }
+      {
+        fileId,
+        alt: 'media',
+        supportsAllDrives: true
+      },
+      {
+        responseType: 'stream'
+      }
     );
 
     await new Promise((resolve, reject) => {
@@ -90,13 +128,10 @@ async function loadExcel() {
 
     const wb = XLSX.readFile("temp.xlsx");
     const sheet = wb.Sheets[wb.SheetNames[0]];
-
-    // 🔥 Important fix
     const raw = XLSX.utils.sheet_to_json(sheet, { defval: "" });
 
     console.log("🔥 TOTAL ROWS:", raw.length);
     console.log("🔥 HEADERS:", Object.keys(raw[0] || {}));
-    console.log("🔥 SAMPLE:", raw[0]);
 
     DATA = raw.map(row => {
 
@@ -167,11 +202,16 @@ app.post('/uploadExcel', upload.single('file'), async (req, res) => {
 
   const existing = await drive.files.list({
     q: `'${FOLDER_ID}' in parents and name='MASTER_EXCEL.xlsx'`,
-    fields: 'files(id)'
+    fields: 'files(id)',
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true
   });
 
   if (existing.data.files.length > 0) {
-    await drive.files.delete({ fileId: existing.data.files[0].id });
+    await drive.files.delete({
+      fileId: existing.data.files[0].id,
+      supportsAllDrives: true
+    });
   }
 
   await uploadToDrive(req.file.path, "MASTER_EXCEL.xlsx");
@@ -181,23 +221,6 @@ app.post('/uploadExcel', upload.single('file'), async (req, res) => {
 
   res.send("Excel uploaded");
 });
-
-// ================= DRIVE FUNCTIONS =================
-async function uploadToDrive(filePath, name) {
-  const res = await drive.files.create({
-    requestBody: { name, parents: [FOLDER_ID] },
-    media: { body: fs.createReadStream(filePath) }
-  });
-  return res.data.id;
-}
-
-async function getLink(id) {
-  await drive.permissions.create({
-    fileId: id,
-    requestBody: { role: 'reader', type: 'anyone' }
-  });
-  return `https://drive.google.com/uc?id=${id}`;
-}
 
 // ================= GET DATA =================
 app.get('/getData', (req, res) => {
