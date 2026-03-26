@@ -4,68 +4,16 @@
 <title>Statement Portal</title>
 
 <style>
-body{
-  font-family: Arial;
-  margin:20px;
-  background:#f5f7fa;
-}
-
-h2{
-  text-align:center;
-}
-
-/* CARDS */
-.cards{
-  display:flex;
-  gap:15px;
-  margin-bottom:20px;
-}
-
-.card{
-  flex:1;
-  background:white;
-  padding:15px;
-  border-radius:10px;
-  box-shadow:0 2px 8px rgba(0,0,0,0.1);
-  text-align:center;
-  cursor:pointer;
-}
-
-.card b{
-  font-size:22px;
-  color:#007bff;
-}
-
-/* TABLE */
-table{
-  width:100%;
-  border-collapse:collapse;
-  background:white;
-}
-
-th,td{
-  border:1px solid #ddd;
-  padding:8px;
-}
-
-th{
-  background:#007bff;
-  color:white;
-}
-
-input{
-  padding:5px;
-  width:95%;
-}
-
-button{
-  padding:5px 10px;
-  margin:2px;
-  background:#007bff;
-  color:white;
-  border:none;
-  cursor:pointer;
-}
+body{font-family:Arial;margin:20px;background:#f5f7fa;}
+h2{text-align:center;}
+.cards{display:flex;gap:15px;margin-bottom:20px;}
+.card{flex:1;background:white;padding:15px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.1);text-align:center;cursor:pointer;}
+.card b{font-size:22px;color:#007bff;}
+table{width:100%;border-collapse:collapse;background:white;}
+th,td{border:1px solid #ddd;padding:8px;}
+th{background:#007bff;color:white;}
+input{padding:5px;width:95%;}
+button{padding:5px 10px;margin:2px;background:#007bff;color:white;border:none;cursor:pointer;}
 </style>
 </head>
 
@@ -73,19 +21,15 @@ button{
 
 <h2>Statement Portal</h2>
 
-<!-- ADMIN OPTIONS -->
 <div id="adminPanel">
   <input type="file" id="file">
   <button onclick="upload()">Upload Excel</button>
-  <button onclick="downloadReport()">Download Report</button>
-  <button onclick="downloadAll()">Download Files</button>
 </div>
 
 <button onclick="downloadPending()">Download Pending</button>
 
 <br><br>
 
-<!-- CARDS -->
 <div class="cards">
   <div class="card" onclick="applyCardFilter('total')" id="totalCard"></div>
   <div class="card" onclick="applyCardFilter('sssReceived')" id="sssCard"></div>
@@ -94,7 +38,6 @@ button{
   <div class="card" onclick="applyCardFilter('awsPending')" id="awsPendingCard"></div>
 </div>
 
-<!-- TABLE -->
 <table>
 
 <thead>
@@ -141,20 +84,28 @@ async function load(){
   }
 
   render(allData);
-  loadDashboard();
+  calculateCards(allData);
 }
 
-// ===== DASHBOARD =====
-async function loadDashboard(){
+// ===== CARD CALCULATION (FIXED) =====
+function calculateCards(data){
 
-  let res = await fetch('/dashboard');
-  let d = await res.json();
+  let total = data.length;
 
-  totalCard.innerHTML = `Total<br><b>${d.total}</b>`;
-  sssCard.innerHTML = `SSS Received<br><b>${d.sssReceived}</b><br>${d.sssReceivedPercent}%`;
-  sssPendingCard.innerHTML = `SSS Pending<br><b>${d.sssPending}</b><br>${d.sssPendingPercent}%`;
-  awsCard.innerHTML = `AWS Received<br><b>${d.awsReceived}</b><br>${d.awsReceivedPercent}%`;
-  awsPendingCard.innerHTML = `AWS Pending<br><b>${d.awsPending}</b><br>${d.awsPendingPercent}%`;
+  let sssReceived = data.filter(r=>r.SSS).length;
+  let awsReceived = data.filter(r=>r.AWS).length;
+
+  let sssPending = total - sssReceived;
+  let awsPending = total - awsReceived;
+
+  let sssPercent = total ? ((sssReceived/total)*100).toFixed(1) : 0;
+  let awsPercent = total ? ((awsReceived/total)*100).toFixed(1) : 0;
+
+  totalCard.innerHTML = `Total<br><b>${total}</b>`;
+  sssCard.innerHTML = `SSS Received<br><b>${sssReceived}</b><br>${sssPercent}%`;
+  sssPendingCard.innerHTML = `SSS Pending<br><b>${sssPending}</b><br>${100-sssPercent}%`;
+  awsCard.innerHTML = `AWS Received<br><b>${awsReceived}</b><br>${awsPercent}%`;
+  awsPendingCard.innerHTML = `AWS Pending<br><b>${awsPending}</b><br>${100-awsPercent}%`;
 }
 
 // ===== RENDER =====
@@ -162,6 +113,11 @@ function render(data){
 
   let body = document.getElementById("body");
   body.innerHTML = "";
+
+  if(data.length === 0){
+    body.innerHTML = "<tr><td colspan='7'>No Data Available</td></tr>";
+    return;
+  }
 
   data.forEach(r => {
 
@@ -178,7 +134,6 @@ function render(data){
         onchange="saveValue('${r.Code}',this.value)">
       </td>
 
-      <!-- SSS -->
       <td>
         ${
           r.SSS
@@ -195,7 +150,6 @@ function render(data){
         }
       </td>
 
-      <!-- AWS -->
       <td>
         ${
           r.AWS
@@ -262,8 +216,16 @@ async function saveValue(code,value){
 function selectFile(input, code, type){
 
   let file = input.files[0];
-  let div = document.getElementById(`${type.toLowerCase()}_${code}`);
 
+  let row = allData.find(r=>r.Code==code);
+
+  if(!row.Value){
+    alert("Enter Value first");
+    input.value="";
+    return;
+  }
+
+  let div = document.getElementById(`${type.toLowerCase()}_${code}`);
   div.file = file;
 
   div.innerHTML = `
@@ -310,14 +272,6 @@ async function deleteFile(code,type){
 }
 
 // ===== DOWNLOAD =====
-function downloadReport(){
-  window.open('/downloadReport');
-}
-
-function downloadAll(){
-  window.open('/downloadAllFiles');
-}
-
 function downloadPending(){
   window.open('/downloadPending');
 }

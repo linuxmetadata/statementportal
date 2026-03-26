@@ -1,3 +1,6 @@
-node_modules
-uploads
-*.xlsx
+node_modules/
+uploads/
+.env
+temp.xlsx
+*.log
+.DS_Store

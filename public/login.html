@@ -2,6 +2,7 @@
 <html>
 <head>
   <title>Login</title>
+
   <style>
     body{
       font-family: Arial;
@@ -9,77 +10,61 @@
       margin-top:100px;
       background:#f5f7fa;
     }
+
     input, select, button{
       padding:10px;
       margin:10px;
-      width:250px;
+      width:260px;
     }
+
     button{
       background:#007bff;
       color:white;
       border:none;
       cursor:pointer;
     }
+
+    .box{
+      background:white;
+      display:inline-block;
+      padding:30px;
+      border-radius:10px;
+      box-shadow:0 2px 10px rgba(0,0,0,0.1);
+    }
   </style>
 </head>
 
 <body>
 
+<div class="box">
+
 <h2>Statement Portal Login</h2>
 
-<select id="type">
+<select id="type" onchange="toggleFields()">
   <option value="user">User Login</option>
   <option value="admin">Admin Login</option>
 </select>
 
 <br>
 
-<input id="email" placeholder="Enter Email (User)">
-<br>
+<!-- USER -->
+<div id="userBox">
+  <input id="email" placeholder="Enter Email">
+</div>
 
-<input id="username" placeholder="Admin Username">
-<br>
+<!-- ADMIN -->
+<div id="adminBox" style="display:none;">
+  <input id="username" placeholder="Admin Username">
+  <br>
+  <input id="password" type="password" placeholder="Admin Password">
+</div>
 
-<input id="password" type="password" placeholder="Admin Password">
 <br>
 
 <button onclick="login()">Login</button>
 
+</div>
+
 <script>
-async function login(){
 
-  let type = document.getElementById("type").value;
-
-  let body = {};
-
-  if(type === "user"){
-    body = {
-      type,
-      email: document.getElementById("email").value
-    };
-  } else {
-    body = {
-      type,
-      username: document.getElementById("username").value,
-      password: document.getElementById("password").value
-    };
-  }
-
-  let res = await fetch('/login',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(body)
-  });
-
-  let msg = await res.text();
-
-  if(msg === "success"){
-    window.location = "dashboard.html";
-  } else {
-    alert("Login failed");
-  }
-}
-</script>
-
-</body>
-</html>
+function toggleFields
