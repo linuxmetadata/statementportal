@@ -30,18 +30,32 @@ app.get('/', (req, res) => {
 const PORT = process.env.PORT || 3000;
 const upload = multer({ dest: 'uploads/' });
 
-// ===== GOOGLE DRIVE AUTH (SAFE) =====
-let credentials = {};
-try {
-  credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS || "{}");
-} catch (err) {
-  console.error("❌ Invalid GOOGLE_CREDENTIALS JSON");
-}
+// ===== DEBUG ENV =====
+console.log("ENV CHECK:", !!process.env.GOOGLE_CREDENTIALS);
 
-const auth = new google.auth.GoogleAuth({
-  credentials,
-  scopes: ['https://www.googleapis.com/auth/drive']
-});
+// ===== GOOGLE DRIVE AUTH (SAFE VERSION) =====
+let auth;
+
+try {
+  if (!process.env.GOOGLE_CREDENTIALS) {
+    throw new Error("Missing GOOGLE_CREDENTIALS");
+  }
+
+  const parsed = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+
+  auth = new google.auth.GoogleAuth({
+    credentials: parsed,
+    scopes: ['https://www.googleapis.com/auth/drive']
+  });
+
+} catch (err) {
+  console.error("❌ GOOGLE DRIVE INIT FAILED:", err.message);
+
+  // fallback (prevents crash)
+  auth = new google.auth.GoogleAuth({
+    scopes: ['https://www.googleapis.com/auth/drive']
+  });
+}
 
 const drive = google.drive({ version: 'v3', auth });
 
@@ -82,18 +96,16 @@ async function getFileLink(fileId){
   return `https://drive.google.com/uc?id=${fileId}`;
 }
 
-// ===== LOAD EXCEL FROM DRIVE =====
+// ===== LOAD EXCEL =====
 async function loadExcelFromDrive(){
-
   try{
-
     const res = await drive.files.list({
       q: `'${FOLDER_ID}' in parents and name='MASTER_EXCEL.xlsx'`,
-      fields: 'files(id, name)'
+      fields: 'files(id)'
     });
 
     if(res.data.files.length === 0){
-      console.log("⚠ No Excel found in Drive");
+      console.log("⚠ No Excel found");
       return;
     }
 
@@ -107,8 +119,7 @@ async function loadExcelFromDrive(){
     );
 
     await new Promise((resolve,reject)=>{
-      response.data
-        .pipe(dest)
+      response.data.pipe(dest)
         .on('finish', resolve)
         .on('error', reject);
     });
@@ -139,7 +150,7 @@ async function loadExcelFromDrive(){
 
     fs.unlinkSync("temp.xlsx");
 
-    console.log("✅ Excel loaded from Drive");
+    console.log("✅ Excel loaded");
 
   }catch(err){
     console.error("❌ Excel load error:", err);
@@ -174,7 +185,7 @@ app.post('/uploadExcel', upload.single('file'), async (req,res)=>{
 
   try{
 
-    // DELETE OLD EXCEL
+    // delete old excel
     const existing = await drive.files.list({
       q: `'${FOLDER_ID}' in parents and name='MASTER_EXCEL.xlsx'`,
       fields: 'files(id)'
@@ -184,7 +195,7 @@ app.post('/uploadExcel', upload.single('file'), async (req,res)=>{
       await drive.files.delete({ fileId: existing.data.files[0].id });
     }
 
-    // UPLOAD NEW
+    // upload new
     await uploadToDrive(req.file.path, "MASTER_EXCEL.xlsx");
 
     fs.unlinkSync(req.file.path);
