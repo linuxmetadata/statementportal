@@ -30,17 +30,10 @@ app.get('/', (req, res) => {
 const PORT = process.env.PORT || 3000;
 const upload = multer({ dest: 'uploads/' });
 
-// ===== DEBUG ENV =====
-console.log("ENV CHECK:", !!process.env.GOOGLE_CREDENTIALS);
-
-// ===== GOOGLE DRIVE AUTH (SAFE VERSION) =====
+// ===== GOOGLE AUTH =====
 let auth;
 
 try {
-  if (!process.env.GOOGLE_CREDENTIALS) {
-    throw new Error("Missing GOOGLE_CREDENTIALS");
-  }
-
   const parsed = JSON.parse(process.env.GOOGLE_CREDENTIALS);
 
   auth = new google.auth.GoogleAuth({
@@ -49,12 +42,7 @@ try {
   });
 
 } catch (err) {
-  console.error("❌ GOOGLE DRIVE INIT FAILED:", err.message);
-
-  // fallback (prevents crash)
-  auth = new google.auth.GoogleAuth({
-    scopes: ['https://www.googleapis.com/auth/drive']
-  });
+  console.error("❌ GOOGLE AUTH ERROR:", err.message);
 }
 
 const drive = google.drive({ version: 'v3', auth });
@@ -64,7 +52,14 @@ const FOLDER_ID = '168KzEusKlXsHQ-votUNTNA9g0VIai4X-';
 // ===== GLOBAL DATA =====
 let DATA = [];
 
-// ===== HELPERS =====
+// ===== HELPER =====
+function getVal(row, keys){
+  for(let k of keys){
+    if(row[k]) return row[k];
+  }
+  return "";
+}
+
 function checkAuth(req, res){
   if(!req.session.user){
     res.send("Login required");
@@ -96,9 +91,11 @@ async function getFileLink(fileId){
   return `https://drive.google.com/uc?id=${fileId}`;
 }
 
-// ===== LOAD EXCEL =====
+// ===== LOAD EXCEL FROM DRIVE (FIXED HERE) =====
 async function loadExcelFromDrive(){
+
   try{
+
     const res = await drive.files.list({
       q: `'${FOLDER_ID}' in parents and name='MASTER_EXCEL.xlsx'`,
       fields: 'files(id)'
@@ -128,11 +125,15 @@ async function loadExcelFromDrive(){
     const sheet = wb.Sheets[wb.SheetNames[0]];
     let data = XLSX.utils.sheet_to_json(sheet);
 
+    // 🔥 DEBUG LOG
+    console.log("RAW EXCEL:", data);
+
+    // 🔥 FLEXIBLE MAPPING (FIX)
     DATA = data.map(row => ({
-      STATE: row["STATE"] || row["State"] || "",
-      BM_HQ: row["BM HQ"] || row["BM_HQ"] || "",
-      Code: row["Stockist Code"] || row["Code"] || "",
-      Name: row["Stockist Name"] || row["Name"] || "",
+      STATE: getVal(row, ["STATE","State","state"]),
+      BM_HQ: getVal(row, ["BM HQ","BM_HQ","BMHQ"]),
+      Code: getVal(row, ["Stockist Code","Code","CODE"]),
+      Name: getVal(row, ["Stockist Name","Name","NAME"]),
 
       Value: "",
       SSS: false,
@@ -150,7 +151,7 @@ async function loadExcelFromDrive(){
 
     fs.unlinkSync("temp.xlsx");
 
-    console.log("✅ Excel loaded");
+    console.log("✅ Excel Loaded Rows:", DATA.length);
 
   }catch(err){
     console.error("❌ Excel load error:", err);
@@ -185,7 +186,6 @@ app.post('/uploadExcel', upload.single('file'), async (req,res)=>{
 
   try{
 
-    // delete old excel
     const existing = await drive.files.list({
       q: `'${FOLDER_ID}' in parents and name='MASTER_EXCEL.xlsx'`,
       fields: 'files(id)'
@@ -195,7 +195,6 @@ app.post('/uploadExcel', upload.single('file'), async (req,res)=>{
       await drive.files.delete({ fileId: existing.data.files[0].id });
     }
 
-    // upload new
     await uploadToDrive(req.file.path, "MASTER_EXCEL.xlsx");
 
     fs.unlinkSync(req.file.path);
@@ -250,16 +249,6 @@ app.post('/uploadFile', upload.single('file'), async (req,res)=>{
     if(!allowed.includes(ext)){
       fs.unlinkSync(file.path);
       return res.send("Invalid format");
-    }
-
-    if(ext === '.pdf'){
-      const buffer = fs.readFileSync(file.path);
-      const parsed = await pdfParse(buffer);
-
-      if(!parsed.text || parsed.text.trim().length < 10){
-        fs.unlinkSync(file.path);
-        return res.send("Invalid PDF");
-      }
     }
 
     let row = DATA.find(r => r.Code == code);
