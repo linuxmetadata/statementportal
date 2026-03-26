@@ -61,32 +61,6 @@ function checkAuth(req, res) {
   return true;
 }
 
-// ================= CLEAN KEYS =================
-function cleanKey(obj) {
-  let o = {};
-  Object.keys(obj).forEach(k => {
-    o[k.trim()] = obj[k];
-  });
-  return o;
-}
-
-// ================= DRIVE =================
-async function uploadToDrive(filePath, name) {
-  const res = await drive.files.create({
-    requestBody: { name, parents: [FOLDER_ID] },
-    media: { body: fs.createReadStream(filePath) }
-  });
-  return res.data.id;
-}
-
-async function getLink(id) {
-  await drive.permissions.create({
-    fileId: id,
-    requestBody: { role: 'reader', type: 'anyone' }
-  });
-  return `https://drive.google.com/uc?id=${id}`;
-}
-
 // ================= LOAD EXCEL =================
 async function loadExcel() {
   try {
@@ -97,7 +71,7 @@ async function loadExcel() {
     });
 
     if (list.data.files.length === 0) {
-      console.log("No Excel found in Drive");
+      console.log("❌ No Excel found in Drive");
       return;
     }
 
@@ -116,26 +90,32 @@ async function loadExcel() {
 
     const wb = XLSX.readFile("temp.xlsx");
     const sheet = wb.Sheets[wb.SheetNames[0]];
-    const raw = XLSX.utils.sheet_to_json(sheet);
 
-    console.log("First Row:", raw[0]); // DEBUG
+    // 🔥 Important fix
+    const raw = XLSX.utils.sheet_to_json(sheet, { defval: "" });
 
-    // 🔥 EXACT MAPPING BASED ON YOUR EXCEL
-    DATA = raw.map(r => {
+    console.log("🔥 TOTAL ROWS:", raw.length);
+    console.log("🔥 HEADERS:", Object.keys(raw[0] || {}));
+    console.log("🔥 SAMPLE:", raw[0]);
 
-      let row = cleanKey(r);
+    DATA = raw.map(row => {
+
+      let r = {};
+      Object.keys(row).forEach(k => {
+        r[k.trim()] = row[k];
+      });
 
       return {
-        STATE: row["STATE"] || "",
-        BM_HQ: row["BM_HQ"] || "",
-        Code: row["Code"] || "",
-        Name: row["Stockist Name"] || "",
+        STATE: r["STATE"] || "",
+        BM_HQ: r["BM_HQ"] || "",
+        Code: r["Code"] || "",
+        Name: r["Stockist Name"] || "",
 
-        BH_Email: row["BH_Email"] || "",
-        SM_Email: row["SM_Email"] || "",
-        ZBM_Email: row["ZBM_Email"] || "",
-        RBM_Email: row["RBM_Email"] || "",
-        ABM_Email: row["ABM_Email"] || "",
+        BH_Email: r["BH_Email"] || "",
+        SM_Email: r["SM_Email"] || "",
+        ZBM_Email: r["ZBM_Email"] || "",
+        RBM_Email: r["RBM_Email"] || "",
+        ABM_Email: r["ABM_Email"] || "",
 
         Value: "",
         SSS: false,
@@ -150,14 +130,14 @@ async function loadExcel() {
         AWS_Date: ""
       };
 
-    }).filter(r => r.Code); // remove blank rows
+    }).filter(r => r.Code && r.Name);
 
     fs.unlinkSync("temp.xlsx");
 
-    console.log("Excel Loaded:", DATA.length);
+    console.log("✅ FINAL DATA COUNT:", DATA.length);
 
   } catch (err) {
-    console.log("Excel load error:", err.message);
+    console.log("❌ Excel load error:", err.message);
   }
 }
 
@@ -201,6 +181,23 @@ app.post('/uploadExcel', upload.single('file'), async (req, res) => {
 
   res.send("Excel uploaded");
 });
+
+// ================= DRIVE FUNCTIONS =================
+async function uploadToDrive(filePath, name) {
+  const res = await drive.files.create({
+    requestBody: { name, parents: [FOLDER_ID] },
+    media: { body: fs.createReadStream(filePath) }
+  });
+  return res.data.id;
+}
+
+async function getLink(id) {
+  await drive.permissions.create({
+    fileId: id,
+    requestBody: { role: 'reader', type: 'anyone' }
+  });
+  return `https://drive.google.com/uc?id=${id}`;
+}
 
 // ================= GET DATA =================
 app.get('/getData', (req, res) => {
@@ -287,27 +284,6 @@ app.get('/viewFile', (req, res) => {
   const { code, type } = req.query;
   let row = DATA.find(r => r.Code == code);
   res.redirect(row[`${type}_File`]);
-});
-
-// ================= DOWNLOAD REPORT =================
-app.get('/downloadReport', (req, res) => {
-
-  let report = DATA.map(r => ({
-    State: r.STATE,
-    BM_HQ: r.BM_HQ,
-    Code: r.Code,
-    Name: r.Name,
-    Value: r.Value,
-    SSS_Status: r.SSS ? "Done" : "Pending",
-    AWS_Status: r.AWS ? "Done" : "Pending"
-  }));
-
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(report);
-  XLSX.utils.book_append_sheet(wb, ws, "Report");
-
-  XLSX.writeFile(wb, "report.xlsx");
-  res.download("report.xlsx");
 });
 
 // ================= DOWNLOAD PENDING =================
