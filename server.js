@@ -23,17 +23,23 @@ app.use(session({
 const upload = multer({ dest: 'uploads/' });
 const PORT = process.env.PORT || 3000;
 
-// ===== GOOGLE =====
-let auth = new google.auth.GoogleAuth({
-const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+// ===== GOOGLE AUTH (FIXED) =====
+let auth;
 
-// fix newline issue
-creds.private_key = creds.private_key.replace(/\\n/g, '\n');
+try {
+  const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS);
 
-let auth = new google.auth.GoogleAuth({
-  credentials: creds,
-  scopes: ['https://www.googleapis.com/auth/drive']
-});
+  // fix newline issue
+  creds.private_key = creds.private_key.replace(/\\n/g, '\n');
+
+  auth = new google.auth.GoogleAuth({
+    credentials: creds,
+    scopes: ['https://www.googleapis.com/auth/drive']
+  });
+
+} catch (err) {
+  console.error("Google Auth Error:", err.message);
+}
 
 const drive = google.drive({ version: 'v3', auth });
 const FOLDER_ID = '168KzEusKlXsHQ-votUNTNA9g0VIai4X-';
@@ -254,7 +260,6 @@ app.post('/uploadFile', upload.single('file'), async (req,res)=>{
 // ===== VIEW =====
 app.get('/viewFile',(req,res)=>{
   const {code,type} = req.query;
-
   let row = DATA.find(r=>r.Code==code);
   res.redirect(row[`${type}_File`]);
 });
@@ -262,7 +267,6 @@ app.get('/viewFile',(req,res)=>{
 // ===== DELETE =====
 app.post('/deleteFile',(req,res)=>{
   const {code,type} = req.body;
-
   let row = DATA.find(r=>r.Code==code);
 
   row[type]=false;
@@ -324,7 +328,6 @@ app.get('/downloadAllFiles', async (req,res)=>{
 app.get('/downloadPending',(req,res)=>{
 
   const wb = XLSX.utils.book_new();
-
   const pending = DATA.filter(r=>!r.SSS || !r.AWS);
 
   const ws = XLSX.utils.json_to_sheet(pending);
