@@ -48,7 +48,7 @@ const FOLDER_ID = '168KzEusKlXsHQ-votUNTNA9g0VIai4X-';
 // ===== GLOBAL DATA =====
 let DATA = [];
 
-// ===== AUTH CHECK =====
+// ===== HELPERS =====
 function checkAuth(req, res){
   if(!req.session.user){
     res.send("Login required");
@@ -57,17 +57,19 @@ function checkAuth(req, res){
   return true;
 }
 
-// ===== DRIVE FUNCTIONS =====
+function cleanKey(obj){
+  let newObj = {};
+  Object.keys(obj).forEach(k=>{
+    newObj[k.trim()] = obj[k];
+  });
+  return newObj;
+}
+
+// ===== DRIVE =====
 async function uploadToDrive(filePath, fileName){
   const res = await drive.files.create({
-    requestBody: {
-      name: fileName,
-      parents: [FOLDER_ID]
-    },
-    media: {
-      mimeType: 'application/octet-stream',
-      body: fs.createReadStream(filePath)
-    }
+    requestBody: { name: fileName, parents: [FOLDER_ID] },
+    media: { mimeType: 'application/octet-stream', body: fs.createReadStream(filePath) }
   });
   return res.data.id;
 }
@@ -80,27 +82,20 @@ async function getFileLink(fileId){
   return `https://drive.google.com/uc?id=${fileId}`;
 }
 
-// ===== LOAD EXCEL (FINAL FIXED VERSION) =====
+// ===== LOAD EXCEL =====
 async function loadExcelFromDrive(){
-
   try{
-
-    console.log("🔍 Checking Drive for Excel...");
-
     const res = await drive.files.list({
       q: `'${FOLDER_ID}' in parents`,
       fields: 'files(id, name)'
     });
 
-    console.log("📁 Files in Drive:", res.data.files);
-
     if(res.data.files.length === 0){
-      console.log("❌ No Excel found");
+      console.log("No Excel found");
       return;
     }
 
     const file = res.data.files[0];
-    console.log("📄 Using file:", file.name);
 
     const dest = fs.createWriteStream("temp.xlsx");
 
@@ -110,31 +105,27 @@ async function loadExcelFromDrive(){
     );
 
     await new Promise((resolve,reject)=>{
-      response.data.pipe(dest)
-        .on('finish', resolve)
-        .on('error', reject);
+      response.data.pipe(dest).on('finish', resolve).on('error', reject);
     });
 
     const wb = XLSX.readFile("temp.xlsx");
     const sheet = wb.Sheets[wb.SheetNames[0]];
     let raw = XLSX.utils.sheet_to_json(sheet);
 
-    console.log("📊 RAW DATA LENGTH:", raw.length);
-
-    if(raw.length === 0){
-      console.log("❌ Excel is empty OR header issue");
-      return;
-    }
-
-    // 🔥 FORCE SIMPLE MAPPING (WORKS FOR ANY EXCEL)
-    DATA = raw.map(row => {
-      const keys = Object.keys(row);
+    DATA = raw.map(r=>{
+      let row = cleanKey(r);
 
       return {
-        STATE: row[keys[0]] || "",
-        BM_HQ: row[keys[1]] || "",
-        Code: row[keys[2]] || "",
-        Name: row[keys[3]] || "",
+        STATE: row["State"] || "",
+        BM_HQ: row["BM HQ"] || "",
+        Code: row["Code"] || "",
+        Name: row["Stockist Name"] || "",
+
+        BH_Email: row["BH_Email"] || "",
+        SM_Email: row["SM_Email"] || "",
+        ZBM_Email: row["ZBM_Email"] || "",
+        RBM_Email: row["RBM_Email"] || "",
+        ABM_Email: row["ABM_Email"] || "",
 
         Value: "",
         SSS: false,
@@ -145,6 +136,7 @@ async function loadExcelFromDrive(){
 
         SSS_Submitted_By: "",
         AWS_Submitted_By: "",
+
         SSS_Date: "",
         AWS_Date: ""
       };
@@ -152,15 +144,15 @@ async function loadExcelFromDrive(){
 
     fs.unlinkSync("temp.xlsx");
 
-    console.log("✅ FINAL DATA COUNT:", DATA.length);
+    console.log("Loaded rows:", DATA.length);
 
   }catch(err){
-    console.error("❌ LOAD ERROR:", err);
+    console.error("Excel load error:", err);
   }
 }
 
 // ===== LOGIN =====
-app.post('/login', (req,res)=>{
+app.post('/login',(req,res)=>{
   const { type, email, username, password } = req.body;
 
   if(type==="admin"){
@@ -184,9 +176,6 @@ app.post('/uploadExcel', upload.single('file'), async (req,res)=>{
   if(req.session.user.role !== "admin") return res.send("Access denied");
 
   try{
-
-    console.log("📤 Uploading Excel...");
-
     // delete old
     const existing = await drive.files.list({
       q: `'${FOLDER_ID}' in parents`,
@@ -197,7 +186,6 @@ app.post('/uploadExcel', upload.single('file'), async (req,res)=>{
       await drive.files.delete({ fileId: f.id });
     }
 
-    // upload new
     await uploadToDrive(req.file.path, "MASTER_EXCEL.xlsx");
 
     fs.unlinkSync(req.file.path);
@@ -212,10 +200,25 @@ app.post('/uploadExcel', upload.single('file'), async (req,res)=>{
   }
 });
 
-// ===== GET DATA =====
+// ===== GET DATA (WITH EMAIL FILTER) =====
 app.get('/getData',(req,res)=>{
   if(!checkAuth(req,res)) return;
-  res.json({ role:req.session.user.role, data:DATA });
+
+  let result = DATA;
+
+  if(req.session.user.role === "user"){
+    const email = req.session.user.email;
+
+    result = DATA.filter(r =>
+      r.BH_Email === email ||
+      r.SM_Email === email ||
+      r.ZBM_Email === email ||
+      r.RBM_Email === email ||
+      r.ABM_Email === email
+    );
+  }
+
+  res.json({ role:req.session.user.role, data: result });
 });
 
 // ===== SAVE VALUE =====
@@ -253,6 +256,17 @@ app.post('/uploadFile', upload.single('file'), async (req,res)=>{
       return res.send("Invalid format");
     }
 
+    // PDF VALIDATION
+    if(ext === '.pdf'){
+      const buffer = fs.readFileSync(file.path);
+      const parsed = await pdfParse(buffer);
+
+      if(!parsed.text || parsed.text.trim().length < 10){
+        fs.unlinkSync(file.path);
+        return res.send("Invalid PDF");
+      }
+    }
+
     let row = DATA.find(r => r.Code == code);
 
     if(!row){
@@ -287,7 +301,6 @@ app.post('/uploadFile', upload.single('file'), async (req,res)=>{
 
 // ===== VIEW FILE =====
 app.get('/viewFile',(req,res)=>{
-
   if(!checkAuth(req,res)) return;
 
   const { code, type } = req.query;
@@ -305,6 +318,6 @@ app.get('/viewFile',(req,res)=>{
 
 // ===== START =====
 app.listen(PORT, async ()=>{
-  console.log("🚀 Server running on port " + PORT);
+  console.log("Server running...");
   await loadExcelFromDrive();
 });
