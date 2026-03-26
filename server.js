@@ -29,8 +29,6 @@ let drive;
 
 try {
   const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS);
-
-  // FIX PRIVATE KEY
   creds.private_key = creds.private_key.replace(/\\n/g, '\n');
 
   const auth = new google.auth.GoogleAuth({
@@ -97,7 +95,10 @@ async function loadExcel(){
       fields:'files(id)'
     });
 
-    if(list.data.files.length===0) return;
+    if(list.data.files.length===0){
+      console.log("No Excel found in Drive");
+      return;
+    }
 
     const fileId = list.data.files[0].id;
 
@@ -116,14 +117,16 @@ async function loadExcel(){
     const sheet = wb.Sheets[wb.SheetNames[0]];
     const raw = XLSX.utils.sheet_to_json(sheet);
 
+    console.log("Sample Row:", raw[0]); // ✅ DEBUG
+
     DATA = raw.map(r=>{
       let row = cleanKey(r);
 
       return {
-        STATE: row["State"] || "",
-        BM_HQ: row["BM HQ"] || "",
-        Code: row["Code"] || "",
-        Name: row["Stockist Name"] || "",
+        STATE: row["State"] || row["STATE"] || "",
+        BM_HQ: row["BM HQ"] || row["BM_HQ"] || "",
+        Code: row["Code"] || row["CODE"] || "",
+        Name: row["Stockist Name"] || row["Stockist_Name"] || "",
 
         BH_Email: row["BH_Email"] || "",
         SM_Email: row["SM_Email"] || "",
@@ -146,6 +149,7 @@ async function loadExcel(){
     });
 
     fs.unlinkSync("temp.xlsx");
+
     console.log("Excel Loaded:", DATA.length);
 
   } catch (err) {
@@ -177,7 +181,6 @@ app.post('/uploadExcel', upload.single('file'), async (req,res)=>{
   if(!checkAuth(req,res)) return;
   if(req.session.user.role!=="admin") return res.send("Access denied");
 
-  // DELETE OLD FILE
   const existing = await drive.files.list({
     q:`'${FOLDER_ID}' in parents and name='MASTER_EXCEL.xlsx'`,
     fields:'files(id)'
@@ -241,7 +244,6 @@ app.post('/uploadFile', upload.single('file'), async (req,res)=>{
     return res.send("Invalid format");
   }
 
-  // PDF VALIDATION
   if(ext==='.pdf'){
     const buffer = fs.readFileSync(file.path);
     const parsed = await pdfParse(buffer);
@@ -254,7 +256,7 @@ app.post('/uploadFile', upload.single('file'), async (req,res)=>{
 
   let row = DATA.find(r=>r.Code==code);
 
-  if(!row.Value){
+  if(!row || !row.Value){
     fs.unlinkSync(file.path);
     return res.send("Enter Value first");
   }
@@ -275,7 +277,7 @@ app.post('/uploadFile', upload.single('file'), async (req,res)=>{
   res.send("uploaded");
 });
 
-// ================= VIEW FILE =================
+// ================= VIEW =================
 app.get('/viewFile',(req,res)=>{
   const {code,type} = req.query;
   let row = DATA.find(r=>r.Code==code);
