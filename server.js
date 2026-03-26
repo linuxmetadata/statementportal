@@ -11,7 +11,8 @@ const { google } = require('googleapis');
 
 const app = express();
 
-app.use(express.static('public'));
+// ✅ FIXED STATIC PATH
+app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
 app.use(session({
@@ -29,7 +30,7 @@ let auth;
 try {
   const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS);
 
-  // fix newline issue
+  // fix private key newline
   creds.private_key = creds.private_key.replace(/\\n/g, '\n');
 
   auth = new google.auth.GoogleAuth({
@@ -38,7 +39,7 @@ try {
   });
 
 } catch (err) {
-  console.error("Google Auth Error:", err.message);
+  console.log("Google Auth Error:", err.message);
 }
 
 const drive = google.drive({ version: 'v3', auth });
@@ -51,7 +52,7 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
-// ================= HELPERS =================
+// ================= AUTH CHECK =================
 function checkAuth(req,res){
   if(!req.session.user){
     res.send("Login required");
@@ -60,6 +61,7 @@ function checkAuth(req,res){
   return true;
 }
 
+// ================= CLEAN KEYS =================
 function cleanKey(obj){
   let o = {};
   Object.keys(obj).forEach(k=>{
@@ -68,7 +70,7 @@ function cleanKey(obj){
   return o;
 }
 
-// ================= DRIVE =================
+// ================= GOOGLE DRIVE =================
 async function uploadToDrive(filePath,name){
   const res = await drive.files.create({
     requestBody:{ name, parents:[FOLDER_ID] },
@@ -114,6 +116,7 @@ async function loadExcel(){
 
     DATA = raw.map(r=>{
       let row = cleanKey(r);
+
       return {
         STATE: row["State"] || "",
         BM_HQ: row["BM HQ"] || "",
@@ -141,7 +144,8 @@ async function loadExcel(){
     });
 
     fs.unlinkSync("temp.xlsx");
-    console.log("Loaded rows:", DATA.length);
+
+    console.log("Excel Loaded:", DATA.length);
 
   } catch (err) {
     console.log("Excel load error:", err.message);
@@ -239,7 +243,7 @@ app.post('/uploadFile', upload.single('file'), async (req,res)=>{
     const buffer = fs.readFileSync(file.path);
     const parsed = await pdfParse(buffer);
 
-    if(!parsed.text || parsed.text.trim().length<10){
+    if(!parsed.text || parsed.text.trim().length < 10){
       fs.unlinkSync(file.path);
       return res.send("Invalid PDF");
     }
@@ -268,14 +272,14 @@ app.post('/uploadFile', upload.single('file'), async (req,res)=>{
   res.send("uploaded");
 });
 
-// ================= VIEW =================
+// ================= VIEW FILE =================
 app.get('/viewFile',(req,res)=>{
   const {code,type} = req.query;
   let row = DATA.find(r=>r.Code==code);
   res.redirect(row[`${type}_File`]);
 });
 
-// ================= DELETE =================
+// ================= DELETE FILE =================
 app.post('/deleteFile',(req,res)=>{
   const {code,type} = req.body;
   let row = DATA.find(r=>r.Code==code);
@@ -338,10 +342,11 @@ app.get('/downloadAllFiles', async (req,res)=>{
 // ================= DOWNLOAD PENDING =================
 app.get('/downloadPending',(req,res)=>{
 
-  const wb = XLSX.utils.book_new();
   const pending = DATA.filter(r=>!r.SSS || !r.AWS);
 
+  const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(pending);
+
   XLSX.utils.book_append_sheet(wb,ws,"Pending");
 
   XLSX.writeFile(wb,"pending.xlsx");
