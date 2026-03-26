@@ -46,18 +46,18 @@ try {
 }
 
 const drive = google.drive({ version: 'v3', auth });
-
 const FOLDER_ID = '168KzEusKlXsHQ-votUNTNA9g0VIai4X-';
 
 // ===== GLOBAL DATA =====
 let DATA = [];
 
-// ===== HELPER =====
-function getVal(row, keys){
-  for(let k of keys){
-    if(row[k]) return row[k];
-  }
-  return "";
+// ===== HELPERS =====
+function cleanKey(obj){
+  let newObj = {};
+  Object.keys(obj).forEach(k=>{
+    newObj[k.trim()] = obj[k];
+  });
+  return newObj;
 }
 
 function checkAuth(req, res){
@@ -91,7 +91,7 @@ async function getFileLink(fileId){
   return `https://drive.google.com/uc?id=${fileId}`;
 }
 
-// ===== LOAD EXCEL FROM DRIVE (FIXED HERE) =====
+// ===== LOAD EXCEL =====
 async function loadExcelFromDrive(){
 
   try{
@@ -123,35 +123,44 @@ async function loadExcelFromDrive(){
 
     const wb = XLSX.readFile("temp.xlsx");
     const sheet = wb.Sheets[wb.SheetNames[0]];
-    let data = XLSX.utils.sheet_to_json(sheet);
+    let raw = XLSX.utils.sheet_to_json(sheet);
 
-    // 🔥 DEBUG LOG
-    console.log("RAW EXCEL:", data);
+    console.log("RAW EXCEL:", raw);
 
-    // 🔥 FLEXIBLE MAPPING (FIX)
-    DATA = data.map(row => ({
-      STATE: getVal(row, ["STATE","State","state"]),
-      BM_HQ: getVal(row, ["BM HQ","BM_HQ","BMHQ"]),
-      Code: getVal(row, ["Stockist Code","Code","CODE"]),
-      Name: getVal(row, ["Stockist Name","Name","NAME"]),
+    // 🔥 FIXED MAPPING
+    DATA = raw.map(r => {
+      let row = cleanKey(r);
 
-      Value: "",
-      SSS: false,
-      AWS: false,
+      return {
+        STATE: row["State"] || "",
+        BM_HQ: row["BM HQ"] || "",
+        Code: row["Code"] || "",
+        Name: row["Stockist Name"] || "",
 
-      SSS_File: "",
-      AWS_File: "",
+        BH_Email: row["BH_Email"] || "",
+        SM_Email: row["SM_Email"] || "",
+        ZBM_Email: row["ZBM_Email"] || "",
+        RBM_Email: row["RBM_Email"] || "",
+        ABM_Email: row["ABM_Email"] || "",
 
-      SSS_Submitted_By: "",
-      AWS_Submitted_By: "",
+        Value: "",
+        SSS: false,
+        AWS: false,
 
-      SSS_Date: "",
-      AWS_Date: ""
-    }));
+        SSS_File: "",
+        AWS_File: "",
+
+        SSS_Submitted_By: "",
+        AWS_Submitted_By: "",
+
+        SSS_Date: "",
+        AWS_Date: ""
+      };
+    });
 
     fs.unlinkSync("temp.xlsx");
 
-    console.log("✅ Excel Loaded Rows:", DATA.length);
+    console.log("✅ Rows Loaded:", DATA.length);
 
   }catch(err){
     console.error("❌ Excel load error:", err);
