@@ -1,12 +1,12 @@
 const express = require('express');
-const multer = require('multer');
 const XLSX = require('xlsx');
 const fs = require('fs');
 const path = require('path');
 const session = require('express-session');
+const multer = require('multer');
 const pdfParse = require('pdf-parse');
-const archiver = require('archiver');
 const axios = require('axios');
+const archiver = require('archiver');
 const { google } = require('googleapis');
 
 const app = express();
@@ -61,42 +61,15 @@ function checkAuth(req, res) {
   return true;
 }
 
-// ================= GOOGLE DRIVE UPLOAD =================
-async function uploadToDrive(filePath, name) {
-
-  const res = await drive.files.create({
-    requestBody: {
-      name: name,
-      parents: [FOLDER_ID]
-    },
-    media: {
-      body: fs.createReadStream(filePath)
-    },
-
-    supportsAllDrives: true // ✅ FIX
-  });
-
-  return res.data.id;
-}
-
-// ================= GET PUBLIC LINK =================
-async function getLink(id) {
-  await drive.permissions.create({
-    fileId: id,
-    requestBody: { role: 'reader', type: 'anyone' },
-    supportsAllDrives: true
-  });
-
-  return `https://drive.google.com/uc?id=${id}`;
-}
-
-// ================= LOAD EXCEL =================
+// ================= LOAD EXCEL FROM DRIVE =================
 async function loadExcel() {
   try {
 
     const list = await drive.files.list({
-      q: `'${FOLDER_ID}' in parents and name='MASTER_EXCEL.xlsx'`,
-      fields: 'files(id)',
+      q: `'${FOLDER_ID}' in parents`,
+      orderBy: 'createdTime desc',
+      pageSize: 1,
+      fields: 'files(id, name)',
 
       supportsAllDrives: true,
       includeItemsFromAllDrives: true
@@ -107,7 +80,10 @@ async function loadExcel() {
       return;
     }
 
-    const fileId = list.data.files[0].id;
+    const file = list.data.files[0];
+    const fileId = file.id;
+
+    console.log("✅ Using file:", file.name);
 
     const dest = fs.createWriteStream("temp.xlsx");
 
@@ -117,9 +93,7 @@ async function loadExcel() {
         alt: 'media',
         supportsAllDrives: true
       },
-      {
-        responseType: 'stream'
-      }
+      { responseType: 'stream' }
     );
 
     await new Promise((resolve, reject) => {
@@ -131,7 +105,6 @@ async function loadExcel() {
     const raw = XLSX.utils.sheet_to_json(sheet, { defval: "" });
 
     console.log("🔥 TOTAL ROWS:", raw.length);
-    console.log("🔥 HEADERS:", Object.keys(raw[0] || {}));
 
     DATA = raw.map(row => {
 
@@ -169,7 +142,7 @@ async function loadExcel() {
 
     fs.unlinkSync("temp.xlsx");
 
-    console.log("✅ FINAL DATA COUNT:", DATA.length);
+    console.log("✅ DATA LOADED:", DATA.length);
 
   } catch (err) {
     console.log("❌ Excel load error:", err.message);
@@ -194,34 +167,6 @@ app.post('/login', (req, res) => {
   }
 });
 
-// ================= UPLOAD EXCEL =================
-app.post('/uploadExcel', upload.single('file'), async (req, res) => {
-
-  if (!checkAuth(req, res)) return;
-  if (req.session.user.role !== "admin") return res.send("Access denied");
-
-  const existing = await drive.files.list({
-    q: `'${FOLDER_ID}' in parents and name='MASTER_EXCEL.xlsx'`,
-    fields: 'files(id)',
-    supportsAllDrives: true,
-    includeItemsFromAllDrives: true
-  });
-
-  if (existing.data.files.length > 0) {
-    await drive.files.delete({
-      fileId: existing.data.files[0].id,
-      supportsAllDrives: true
-    });
-  }
-
-  await uploadToDrive(req.file.path, "MASTER_EXCEL.xlsx");
-  fs.unlinkSync(req.file.path);
-
-  await loadExcel();
-
-  res.send("Excel uploaded");
-});
-
 // ================= GET DATA =================
 app.get('/getData', (req, res) => {
 
@@ -242,6 +187,12 @@ app.get('/getData', (req, res) => {
   }
 
   res.json({ role: req.session.user.role, data: result });
+});
+
+// ================= REFRESH DATA =================
+app.get('/refreshData', async (req, res) => {
+  await loadExcel();
+  res.send("Refreshed");
 });
 
 // ================= SAVE VALUE =================
@@ -289,8 +240,26 @@ app.post('/uploadFile', upload.single('file'), async (req, res) => {
   const safe = row.Name.replace(/[^a-zA-Z0-9]/g, "_");
   const name = `${safe}_${code}_${type}${ext}`;
 
-  const id = await uploadToDrive(file.path, name);
-  const link = await getLink(id);
+  const uploadRes = await drive.files.create({
+    requestBody: {
+      name,
+      parents: [FOLDER_ID]
+    },
+    media: {
+      body: fs.createReadStream(file.path)
+    },
+    supportsAllDrives: true
+  });
+
+  const fileId = uploadRes.data.id;
+
+  await drive.permissions.create({
+    fileId,
+    requestBody: { role: 'reader', type: 'anyone' },
+    supportsAllDrives: true
+  });
+
+  const link = `https://drive.google.com/uc?id=${fileId}`;
 
   fs.unlinkSync(file.path);
 
@@ -307,20 +276,6 @@ app.get('/viewFile', (req, res) => {
   const { code, type } = req.query;
   let row = DATA.find(r => r.Code == code);
   res.redirect(row[`${type}_File`]);
-});
-
-// ================= DOWNLOAD PENDING =================
-app.get('/downloadPending', (req, res) => {
-
-  const pending = DATA.filter(r => !r.SSS || !r.AWS);
-
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(pending);
-
-  XLSX.utils.book_append_sheet(wb, ws, "Pending");
-
-  XLSX.writeFile(wb, "pending.xlsx");
-  res.download("pending.xlsx");
 });
 
 // ================= START =================
