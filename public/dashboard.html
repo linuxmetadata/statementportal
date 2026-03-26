@@ -4,19 +4,8 @@
   <title>Statement Portal</title>
 
   <style>
-    body { font-family: Arial; background:#f5f5f5; }
+    body { font-family: Arial; background:#f5f5f5; padding:20px; }
     h2 { text-align:center; }
-
-    .btn {
-      padding:6px 10px;
-      margin:2px;
-      cursor:pointer;
-      border:none;
-      color:white;
-      background:#007bff;
-    }
-
-    .delete { background:red; }
 
     table {
       width:100%;
@@ -30,9 +19,27 @@
       text-align:center;
     }
 
-    th { background:#007bff; color:white; }
+    th {
+      background:#007bff;
+      color:white;
+    }
 
-    input { width:100px; }
+    input[type="text"] {
+      width:90px;
+      padding:5px;
+    }
+
+    .btn {
+      padding:5px 10px;
+      margin:2px;
+      border:none;
+      cursor:pointer;
+      color:white;
+      background:#007bff;
+    }
+
+    .delete { background:red; }
+
   </style>
 </head>
 
@@ -40,14 +47,14 @@
 
 <h2>Statement Portal</h2>
 
-<button onclick="downloadReport()">Download Report</button>
-<button onclick="downloadFiles()">Download Files</button>
-<button onclick="downloadPending()">Download Pending</button>
-<button onclick="refresh()">Refresh</button>
+<div style="margin-bottom:10px;">
+  <button onclick="downloadReport()">Download Report</button>
+  <button onclick="downloadPending()">Download Pending</button>
+  <button onclick="downloadFiles()">Download Files</button>
+  <button onclick="refresh()">Refresh</button>
+</div>
 
-<br><br>
-
-<table id="table">
+<table>
 <thead>
 <tr>
   <th>State</th>
@@ -59,52 +66,56 @@
   <th>AWS</th>
 </tr>
 </thead>
-<tbody></tbody>
+
+<tbody id="body"></tbody>
 </table>
 
 <script>
 
 let role = "";
 
-// ================= LOAD DATA =================
-async function loadData() {
+// ================= LOAD =================
+async function load() {
+
   const res = await fetch('/getData');
   const data = await res.json();
 
   role = data.role;
 
-  const tbody = document.querySelector("#table tbody");
-  tbody.innerHTML = "";
+  const body = document.getElementById("body");
+  body.innerHTML = "";
 
-  if (data.data.length === 0) {
-    tbody.innerHTML = "<tr><td colspan='7'>No Data</td></tr>";
+  if (!data.data || data.data.length === 0) {
+    body.innerHTML = "<tr><td colspan='7'>No Data</td></tr>";
     return;
   }
 
-  data.data.forEach(row => {
+  data.data.forEach(r => {
 
     let tr = document.createElement("tr");
 
     tr.innerHTML = `
-      <td>${row.STATE}</td>
-      <td>${row.BM_HQ}</td>
-      <td>${row.Code}</td>
-      <td>${row.Name}</td>
+      <td>${r.STATE}</td>
+      <td>${r.BM_HQ}</td>
+      <td>${r.Code}</td>
+      <td>${r.Name}</td>
 
       <td>
-        <input value="${row.Value}" onchange="saveValue('${row.Code}', this.value)">
+        <input type="text" value="${r.Value || ''}" 
+        onchange="save('${r.Code}', this.value)">
       </td>
 
-      <td>${fileCell(row, 'SSS')}</td>
-      <td>${fileCell(row, 'AWS')}</td>
+      <td>${fileCell(r,'SSS')}</td>
+      <td>${fileCell(r,'AWS')}</td>
     `;
 
-    tbody.appendChild(tr);
+    body.appendChild(tr);
   });
 }
 
-// ================= VALUE SAVE =================
-function saveValue(code, value) {
+// ================= SAVE VALUE =================
+function save(code, value) {
+
   fetch('/saveValue', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
@@ -115,34 +126,52 @@ function saveValue(code, value) {
 // ================= FILE CELL =================
 function fileCell(row, type) {
 
+  const inputId = `${type}_${row.Code}`;
+  const btnId = `btn_${inputId}`;
+
+  // 🔹 NO FILE
   if (!row[`${type}_File`]) {
 
     return `
-      <input type="file" id="${type}_${row.Code}">
-      <button class="btn" onclick="upload('${row.Code}','${type}')">Upload</button>
+      <input type="file" id="${inputId}" onchange="showUpload('${row.Code}','${type}')">
+      <div id="${btnId}"></div>
     `;
+  }
 
-  } else {
+  // 🔹 FILE EXISTS
+  let viewBtn = `<button class="btn" onclick="view('${row.Code}','${type}')">View</button>`;
 
-    let view = `<button class="btn" onclick="view('${row.Code}','${type}')">View</button>`;
+  let deleteBtn = "";
 
-    let del = "";
+  if (role === "admin") {
+    deleteBtn = `<button class="btn delete" onclick="del('${row.Code}','${type}')">Delete</button>`;
+  }
 
-    if (role === "admin") {
-      del = `<button class="btn delete" onclick="delFile('${row.Code}','${type}')">Delete</button>`;
-    }
+  return viewBtn + deleteBtn;
+}
 
-    return view + del;
+// ================= SHOW UPLOAD =================
+function showUpload(code, type) {
+
+  const input = document.getElementById(`${type}_${code}`);
+
+  if (input.files.length > 0) {
+
+    document.getElementById(`btn_${type}_${code}`).innerHTML = `
+      <button class="btn" onclick="upload('${code}','${type}')">Upload</button>
+    `;
   }
 }
 
 // ================= UPLOAD =================
 async function upload(code, type) {
 
-  let input = document.getElementById(`${type}_${code}`);
-  let file = input.files[0];
+  const input = document.getElementById(`${type}_${code}`);
+  const file = input.files[0];
 
-  if (!file) return alert("Choose file");
+  if (!file) {
+    return alert("Please choose file");
+  }
 
   const form = new FormData();
   form.append("file", file);
@@ -154,10 +183,15 @@ async function upload(code, type) {
     body: form
   });
 
-  const msg = await res.text();
-  alert(msg);
+  const result = await res.json();
 
-  loadData();
+  if (result.status === "success") {
+    alert("✅ File Uploaded Successfully");
+  } else {
+    alert("❌ " + result.msg);
+  }
+
+  load();
 }
 
 // ================= VIEW =================
@@ -166,9 +200,9 @@ function view(code, type) {
 }
 
 // ================= DELETE =================
-async function delFile(code, type) {
+async function del(code, type) {
 
-  if (!confirm("Delete file?")) return;
+  if (!confirm("Delete this file?")) return;
 
   await fetch('/deleteFile', {
     method:'POST',
@@ -176,7 +210,7 @@ async function delFile(code, type) {
     body: JSON.stringify({code, type})
   });
 
-  loadData();
+  load();
 }
 
 // ================= DOWNLOAD =================
@@ -184,22 +218,22 @@ function downloadReport() {
   window.open('/downloadReport');
 }
 
-function downloadFiles() {
-  window.open('/downloadAllFiles');
-}
-
 function downloadPending() {
   window.open('/downloadPending');
+}
+
+function downloadFiles() {
+  window.open('/downloadAllFiles');
 }
 
 // ================= REFRESH =================
 async function refresh() {
   await fetch('/refreshData');
-  loadData();
+  load();
 }
 
 // ================= INIT =================
-loadData();
+load();
 
 </script>
 
