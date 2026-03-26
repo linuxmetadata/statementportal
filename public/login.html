@@ -1,35 +1,6 @@
-<script>
-async function login(){
-
-  const type = document.getElementById("type").value;
-
-  let body = {};
-
-  if(type === "admin"){
-    body = {
-      type,
-      username: document.getElementById("username").value,
-      password: document.getElementById("password").value
-    };
-  } else {
-    body = {
-      type,
-      email: document.getElementById("email").value
-    };
-  }
-
-  const res = await fetch('/login',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(body)
-  });
-
-  const text = await res.text();
-
-  if(text === "success"){
-    window.location.href = "dashboard.html";
-  } else {
-    alert("Invalid Login");
-  }
-}
-</script>
+<!DOCTYPE html>
+<html>
+<body>
+<h1>Login Page Working ✅</h1>
+</body>
+</html>
