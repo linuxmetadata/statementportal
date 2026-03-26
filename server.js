@@ -25,7 +25,13 @@ const PORT = process.env.PORT || 3000;
 
 // ===== GOOGLE =====
 let auth = new google.auth.GoogleAuth({
-  credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
+const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+
+// fix newline issue
+creds.private_key = creds.private_key.replace(/\\n/g, '\n');
+
+let auth = new google.auth.GoogleAuth({
+  credentials: creds,
   scopes: ['https://www.googleapis.com/auth/drive']
 });
 
