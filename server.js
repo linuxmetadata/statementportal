@@ -5,11 +5,10 @@ const fs = require('fs');
 const path = require('path');
 const session = require('express-session');
 const pdfParse = require('pdf-parse');
-const archiver = require('archiver');
+const { google } = require('googleapis');
 
 const app = express();
 
-// ===== MIDDLEWARE =====
 app.use(express.static('public'));
 app.use(express.json());
 
@@ -19,373 +18,231 @@ app.use(session({
   saveUninitialized: true
 }));
 
-// ===== ROOT =====
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
-// ===== PORT =====
 const PORT = process.env.PORT || 3000;
-
-// ===== STORAGE =====
 const upload = multer({ dest: 'uploads/' });
 
-// ===== DATA =====
-function readData() {
-  try {
-    if (!fs.existsSync('data.json')) return [];
-    return JSON.parse(fs.readFileSync('data.json'));
-  } catch {
-    return [];
+// ===== GOOGLE DRIVE =====
+const auth = new google.auth.GoogleAuth({
+  credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
+  scopes: ['https://www.googleapis.com/auth/drive']
+});
+
+const drive = google.drive({ version: 'v3', auth });
+
+const FOLDER_ID = '168KzEusKlXsHQ-votUNTNA9g0VIai4X-';
+
+// ===== GLOBAL DATA (IN MEMORY) =====
+let DATA = [];
+
+// ===== DRIVE FUNCTIONS =====
+async function uploadToDrive(filePath, fileName){
+  const res = await drive.files.create({
+    requestBody: {
+      name: fileName,
+      parents: [FOLDER_ID]
+    },
+    media: {
+      mimeType: 'application/octet-stream',
+      body: fs.createReadStream(filePath)
+    }
+  });
+  return res.data.id;
+}
+
+async function getFileLink(fileId){
+  await drive.permissions.create({
+    fileId,
+    requestBody: { role:'reader', type:'anyone' }
+  });
+  return `https://drive.google.com/uc?id=${fileId}`;
+}
+
+// ===== LOAD EXCEL FROM DRIVE =====
+async function loadExcelFromDrive(){
+
+  const res = await drive.files.list({
+    q: `'${FOLDER_ID}' in parents and name='MASTER_EXCEL.xlsx'`,
+    fields: 'files(id, name)'
+  });
+
+  if(res.data.files.length === 0){
+    console.log("No Excel found in Drive");
+    return;
   }
-}
 
-function writeData(data) {
-  fs.writeFileSync('data.json', JSON.stringify(data, null, 2));
-}
+  const fileId = res.data.files[0].id;
 
-// ===== FLEXIBLE COLUMN GET =====
-function getVal(row, keys){
-  for(let k of keys){
-    if(row[k]) return row[k];
-  }
-  return "";
-}
+  const dest = fs.createWriteStream("temp.xlsx");
 
-// ===== EMAIL MATCH =====
-function emailMatch(row, email) {
-  email = (email || "").toLowerCase();
+  const response = await drive.files.get(
+    { fileId, alt:'media' },
+    { responseType:'stream' }
+  );
 
-  return [
-    row.BH_Email,
-    row.SM_Email,
-    row.ZBM_Email,
-    row.RBM_Email,
-    row.ABM_Email
-  ].some(e => (e || "").toLowerCase().includes(email));
+  await new Promise((resolve,reject)=>{
+    response.data
+      .pipe(dest)
+      .on('finish', resolve)
+      .on('error', reject);
+  });
+
+  const wb = XLSX.readFile("temp.xlsx");
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  let data = XLSX.utils.sheet_to_json(sheet);
+
+  DATA = data.map(row => ({
+    STATE: row["STATE"] || row["State"],
+    BM_HQ: row["BM HQ"] || row["BM_HQ"],
+    Code: row["Stockist Code"] || row["Code"],
+    Name: row["Stockist Name"] || row["Name"],
+
+    Value: "",
+    SSS: false,
+    AWS: false,
+
+    SSS_File: "",
+    AWS_File: "",
+
+    SSS_Submitted_By: "",
+    AWS_Submitted_By: "",
+
+    SSS_Date: "",
+    AWS_Date: ""
+  }));
+
+  fs.unlinkSync("temp.xlsx");
+
+  console.log("Excel loaded from Drive");
 }
 
 // ===== LOGIN =====
-app.post('/login', (req, res) => {
+app.post('/login', (req,res)=>{
 
   const { type, email, username, password } = req.body;
 
-  if (type === "admin") {
-    if (username === "admin" && password === "admin123") {
-      req.session.user = { role: "admin" };
+  if(type==="admin"){
+    if(username==="admin" && password==="admin123"){
+      req.session.user = { role:"admin" };
       return res.send("success");
     }
     return res.send("fail");
   }
 
-  if (type === "user") {
-    let data = readData();
-
-    const exists = data.some(r => emailMatch(r, email));
-
-    if (!exists) return res.send("fail");
-
-    req.session.user = { role: "user", email };
+  if(type==="user"){
+    req.session.user = { role:"user", email };
     return res.send("success");
   }
 
-  res.send("fail");
 });
 
-// ===== UPLOAD EXCEL =====
-app.post('/uploadExcel', upload.single('file'), (req, res) => {
+// ===== UPLOAD EXCEL (STORE IN DRIVE) =====
+app.post('/uploadExcel', upload.single('file'), async (req,res)=>{
 
-  if (!req.session.user || req.session.user.role !== "admin") {
+  if(req.session.user.role!=="admin"){
     return res.send("Access denied");
   }
 
-  try {
+  const fileId = await uploadToDrive(req.file.path, "MASTER_EXCEL.xlsx");
 
-    const wb = XLSX.readFile(req.file.path);
-    const sheet = wb.Sheets[wb.SheetNames[0]];
-    let data = XLSX.utils.sheet_to_json(sheet);
+  fs.unlinkSync(req.file.path);
 
-    data = data.map(row => ({
-      BH_Email: getVal(row, ["BH_Email"]),
-      SM_Email: getVal(row, ["SM_Email"]),
-      ZBM_Email: getVal(row, ["ZBM_Email"]),
-      RBM_Email: getVal(row, ["RBM_Email"]),
-      ABM_Email: getVal(row, ["ABM_Email"]),
+  await loadExcelFromDrive();
 
-      STATE: getVal(row, ["STATE","State"]),
-      BM_HQ: getVal(row, ["BM HQ","BM_HQ"]),
-      Code: getVal(row, ["Stockist Code","STOCKIST CODE","Code","CODE"]),
-      Name: getVal(row, ["Stockist Name","STOCKIST NAME","Name"]),
-
-      Value: "",
-
-      SSS: false,
-      AWS: false,
-
-      SSS_File: "",
-      AWS_File: "",
-
-      SSS_Submitted_By: "",
-      AWS_Submitted_By: "",
-
-      SSS_Date: "",
-      AWS_Date: ""
-    }));
-
-    writeData(data);
-    fs.unlinkSync(req.file.path);
-
-    res.send("uploaded");
-
-  } catch (err) {
-    console.log(err);
-    res.send("error uploading excel");
-  }
+  res.send("Excel uploaded & loaded");
 });
 
 // ===== GET DATA =====
-app.get('/getData', (req, res) => {
-
-  if (!req.session.user) return res.json([]);
-
-  let data = readData();
-
-  if (req.session.user.role === "admin") {
-    return res.json({ role: "admin", data });
-  }
-
-  let email = req.session.user.email;
-  let filtered = data.filter(r => emailMatch(r, email));
-
-  res.json({ role: "user", data: filtered });
+app.get('/getData',(req,res)=>{
+  res.json({ role:req.session.user.role, data:DATA });
 });
 
 // ===== SAVE VALUE =====
-app.post('/saveValue', (req, res) => {
-
+app.post('/saveValue',(req,res)=>{
   const { code, value } = req.body;
 
-  let data = readData();
-
-  data.forEach(r => {
-    if (r.Code == code) {
+  DATA.forEach(r=>{
+    if(r.Code == code){
       r.Value = value;
     }
   });
-
-  writeData(data);
 
   res.send("saved");
 });
 
 // ===== FILE UPLOAD =====
-app.post('/uploadFile', upload.single('file'), async (req, res) => {
+app.post('/uploadFile', upload.single('file'), async (req,res)=>{
 
-  try {
+  try{
 
     const { code, type } = req.body;
     const file = req.file;
 
-    if (!file) return res.send("No file");
+    if(!file) return res.send("No file");
 
-    const allowed = ['.pdf','.doc','.docx','.xls','.xlsx','.txt','.html'];
     const ext = path.extname(file.originalname).toLowerCase();
 
-    if (!allowed.includes(ext)) {
+    const allowed = ['.pdf','.doc','.docx','.xls','.xlsx','.txt','.html'];
+
+    if(!allowed.includes(ext)){
       fs.unlinkSync(file.path);
       return res.send("Invalid format");
     }
 
-    if (ext === '.pdf') {
-      const buffer = fs.readFileSync(file.path);
-      const parsed = await pdfParse(buffer);
+    let row = DATA.find(r => r.Code == code);
 
-      if (!parsed.text || parsed.text.trim().length < 10) {
-        fs.unlinkSync(file.path);
-        return res.send("Invalid PDF");
-      }
+    if(!row){
+      fs.unlinkSync(file.path);
+      return res.send("Invalid code");
     }
 
-    let data = readData();
-    let row = data.find(r => r.Code == code);
-
-    if (!row || !row.Value) {
+    if(!row.Value){
       fs.unlinkSync(file.path);
       return res.send("Enter Value first");
     }
 
-    const state = row.STATE || "UNKNOWN";
-    const folder = path.join('uploads', state, type);
-
-    fs.mkdirSync(folder, { recursive: true });
-
-    const cleanName = (row.Name || "FILE").replace(/[^a-zA-Z0-9]/g, "_");
+    const cleanName = row.Name.replace(/[^a-zA-Z0-9]/g,"_");
     const newName = `${cleanName}_${code}_${type}${ext}`;
-    const newPath = path.join(folder, newName);
 
-    fs.renameSync(file.path, newPath);
+    const fileId = await uploadToDrive(file.path, newName);
+    const link = await getFileLink(fileId);
+
+    fs.unlinkSync(file.path);
 
     row[type] = true;
-    row[`${type}_File`] = newPath;
+    row[`${type}_File`] = link;
     row[`${type}_Submitted_By`] = req.session.user.email || "admin";
     row[`${type}_Date`] = new Date().toLocaleString();
 
-    writeData(data);
-
     res.send("uploaded");
 
-  } catch (err) {
+  }catch(err){
     console.log(err);
     res.send("error");
   }
 });
 
 // ===== VIEW FILE =====
-app.get('/viewFile', (req, res) => {
-
+app.get('/viewFile',(req,res)=>{
   const { code, type } = req.query;
 
-  let data = readData();
-  let row = data.find(r => r.Code == code);
+  let row = DATA.find(r => r.Code == code);
 
-  if (!row) return res.send("Not found");
-
-  let filePath = row[`${type}_File`];
-
-  if (!filePath || !fs.existsSync(filePath)) {
-    return res.send("File not found");
-  }
-
-  res.sendFile(path.resolve(filePath));
-});
-
-// ===== DELETE FILE =====
-app.post('/deleteFile', (req, res) => {
-
-  if (!req.session.user || req.session.user.role !== "admin") {
-    return res.send("Access denied");
-  }
-
-  const { code, type } = req.body;
-
-  let data = readData();
-  let row = data.find(r => r.Code == code);
-
-  if (!row) return res.send("Not found");
+  if(!row) return res.send("Not found");
 
   let filePath = row[`${type}_File`];
 
-  if (filePath && fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
-  }
+  if(!filePath) return res.send("File not found");
 
-  row[type] = false;
-  row[`${type}_File`] = "";
-
-  writeData(data);
-
-  res.send("deleted");
+  res.redirect(filePath);
 });
 
-// ===== DASHBOARD =====
-app.get('/dashboard', (req, res) => {
+// ===== START =====
+app.listen(PORT, async ()=>{
+  console.log("Server running on port " + PORT);
 
-  if (!req.session.user) return res.json({});
-
-  let data = readData();
-
-  if (req.session.user.role === "user") {
-    let email = req.session.user.email;
-    data = data.filter(r => emailMatch(r, email));
-  }
-
-  const total = data.length;
-  const sssReceived = data.filter(r => r.SSS).length;
-  const awsReceived = data.filter(r => r.AWS).length;
-
-  const sssPending = total - sssReceived;
-  const awsPending = total - awsReceived;
-
-  function percent(val) {
-    return total === 0 ? 0 : ((val / total) * 100).toFixed(1);
-  }
-
-  res.json({
-    total,
-    sssReceived,
-    sssPending,
-    awsReceived,
-    awsPending,
-    sssReceivedPercent: percent(sssReceived),
-    sssPendingPercent: percent(sssPending),
-    awsReceivedPercent: percent(awsReceived),
-    awsPendingPercent: percent(awsPending)
-  });
-});
-
-// ===== DOWNLOAD REPORT =====
-app.get('/downloadReport', (req, res) => {
-
-  let data = readData();
-
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(data);
-
-  XLSX.utils.book_append_sheet(wb, ws, "Report");
-
-  const file = "report.xlsx";
-  XLSX.writeFile(wb, file);
-
-  res.download(file);
-});
-
-// ===== DOWNLOAD PENDING =====
-app.get('/downloadPending', (req, res) => {
-
-  if (!req.session.user) {
-    return res.send("Login required");
-  }
-
-  let data = readData();
-
-  if (req.session.user.role === "user") {
-    let email = req.session.user.email;
-    data = data.filter(r => emailMatch(r, email));
-  }
-
-  data = data.filter(r => !r.SSS || !r.AWS);
-
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(data);
-
-  XLSX.utils.book_append_sheet(wb, ws, "Pending");
-
-  const file = "pending.xlsx";
-  XLSX.writeFile(wb, file);
-
-  res.download(file);
-});
-
-// ===== DOWNLOAD ALL FILES =====
-app.get('/downloadAllFiles', (req, res) => {
-
-  if (!req.session.user || req.session.user.role !== "admin") {
-    return res.send("Access denied");
-  }
-
-  const archive = archiver('zip');
-
-  res.attachment('All_Files.zip');
-  archive.pipe(res);
-
-  if (fs.existsSync('uploads')) {
-    archive.directory('uploads', false);
-  }
-
-  archive.finalize();
-});
-
-// ===== START SERVER =====
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  await loadExcelFromDrive(); // AUTO LOAD ON START
 });
