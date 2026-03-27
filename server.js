@@ -66,59 +66,50 @@ function saveToFile() {
   fs.writeFileSync('data.json', JSON.stringify(DATA, null, 2));
 }
 
-// ================= LOAD EXCEL (LOCAL ONLY NOW) =================
 async function loadExcel() {
   try {
 
-    if (!fs.existsSync('source.xlsx')) {
-      console.log("❌ No local Excel file (source.xlsx)");
+    const list = await drive.files.list({
+      pageSize: 1,
+      fields: 'files(id, name)'
+    });
+
+    if (!list.data.files.length) {
+      console.log("❌ No Excel found in Drive");
       return;
     }
 
-    const wb = XLSX.readFile("source.xlsx");
+    const file = list.data.files[0];
+    console.log("✅ Using Excel:", file.name);
+
+    const dest = fs.createWriteStream("temp.xlsx");
+
+    const res = await drive.files.get(
+      { fileId: file.id, alt: 'media' },
+      { responseType: 'stream' }
+    );
+
+    await new Promise((resolve, reject) => {
+      res.data.pipe(dest).on('finish', resolve).on('error', reject);
+    });
+
+    const wb = XLSX.readFile("temp.xlsx");
     const sheet = wb.Sheets[wb.SheetNames[0]];
     const raw = XLSX.utils.sheet_to_json(sheet, { defval: "" });
 
-    const savedMap = {};
-    saved.forEach(s => savedMap[s.Code] = s);
+    DATA = raw.map(row => ({
+      STATE: row["STATE"] || "",
+      BM_HQ: row["BM_HQ"] || "",
+      Code: row["Code"] || "",
+      Name: row["Stockist Name"] || "",
+      Value: "",
+      SSS: false,
+      AWS: false
+    }));
 
-    DATA = raw.map(row => {
+    fs.unlinkSync("temp.xlsx");
 
-      let r = {};
-      Object.keys(row).forEach(k => r[k.trim()] = row[k]);
-
-      const old = savedMap[r["Code"]] || {};
-
-      return {
-        STATE: r["STATE"] || "",
-        BM_HQ: r["BM_HQ"] || "",
-        Code: r["Code"] || "",
-        Name: r["Stockist Name"] || "",
-
-        BH_Email: r["BH_Email"] || "",
-        SM_Email: r["SM_Email"] || "",
-        ZBM_Email: r["ZBM_Email"] || "",
-        RBM_Email: r["RBM_Email"] || "",
-        ABM_Email: r["ABM_Email"] || "",
-
-        Value: old.Value || "",
-
-        SSS: old.SSS || false,
-        AWS: old.AWS || false,
-
-        SSS_File: old.SSS_File || "",
-        AWS_File: old.AWS_File || "",
-
-        SSS_Submitted_By: old.SSS_Submitted_By || "",
-        AWS_Submitted_By: old.AWS_Submitted_By || "",
-
-        SSS_Date: old.SSS_Date || "",
-        AWS_Date: old.AWS_Date || ""
-      };
-
-    }).filter(r => r.Code && r.Name);
-
-    console.log("✅ Loaded rows:", DATA.length);
+    console.log("✅ Data Loaded:", DATA.length);
 
   } catch (err) {
     console.log("❌ Load error:", err.message);
