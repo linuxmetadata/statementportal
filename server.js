@@ -14,7 +14,7 @@ const PORT = process.env.PORT || 3000;
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
-// ✅ FIX ROOT ROUTE
+// ✅ ROOT FIX
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
@@ -55,7 +55,7 @@ const FOLDER_ID = '168KzEusKlXsHQ-votUNTNA9g0VIai4X-';
 let DATA = [];
 let saved = [];
 
-// ✅ SAFE LOAD data.json
+// SAFE LOAD
 if (fs.existsSync('data.json')) {
   try {
     const content = fs.readFileSync('data.json', 'utf8');
@@ -66,7 +66,7 @@ if (fs.existsSync('data.json')) {
   }
 }
 
-// ================= SAVE =================
+// SAVE
 function saveToFile() {
   fs.writeFileSync('data.json', JSON.stringify(DATA, null, 2));
 }
@@ -272,9 +272,15 @@ app.post('/uploadFile', upload.single('file'), async (req, res) => {
     res.json({ status: "success" });
 
   } catch (err) {
+
     console.log("❌ FULL UPLOAD ERROR:");
     console.log(err);
-    res.json({ status: "error", msg: "Upload failed" });
+
+    // ✅ FIXED CATCH BLOCK (SHOW REAL ERROR)
+    res.json({
+      status: "error",
+      msg: err.message || "Upload failed"
+    });
   }
 });
 
