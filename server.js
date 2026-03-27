@@ -276,7 +276,8 @@ app.post('/uploadFile', upload.single('file'), async (req, res) => {
     res.json({ status: "success" });
 
   } catch (err) {
-    console.log("Upload error:", err.message);
+    console.log("❌ FULL UPLOAD ERROR:");
+    console.log(err);
     res.json({ status: "error", msg: "Upload failed" });
   }
 });

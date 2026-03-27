@@ -178,17 +178,27 @@ async function upload(code, type) {
   form.append("code", code);
   form.append("type", type);
 
-  const res = await fetch('/uploadFile', {
-    method:'POST',
-    body: form
-  });
+  try {
 
-  const result = await res.json();
+    const res = await fetch('/uploadFile', {
+      method: 'POST',
+      body: form
+    });
 
-  if (result.status === "success") {
-    alert("✅ File Uploaded Successfully");
-  } else {
-    alert("❌ " + result.msg);
+    const result = await res.json();
+
+    if (result.status === "success") {
+      alert("✅ File Uploaded Successfully");
+    } else {
+      alert("❌ " + (result.msg || "Upload failed"));
+      console.log("🔴 Upload Error Response:", result);
+    }
+
+  } catch (err) {
+
+    alert("❌ Server Error");
+    console.log("🔴 Upload Exception:", err);
+
   }
 
   load();
