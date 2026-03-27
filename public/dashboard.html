@@ -163,7 +163,6 @@ function showUpload(code, type) {
   }
 }
 
-// ================= UPLOAD =================
 async function upload(code, type) {
 
   const input = document.getElementById(`${type}_${code}`);
@@ -187,18 +186,17 @@ async function upload(code, type) {
 
     const result = await res.json();
 
+    console.log("UPLOAD RESPONSE:", result); // 👈 IMPORTANT
+
     if (result.status === "success") {
       alert("✅ File Uploaded Successfully");
     } else {
       alert("❌ " + (result.msg || "Upload failed"));
-      console.log("🔴 Upload Error Response:", result);
     }
 
   } catch (err) {
-
-    alert("❌ Server Error");
-    console.log("🔴 Upload Exception:", err);
-
+    console.error("UPLOAD ERROR:", err);
+    alert("❌ Network / Server error");
   }
 
   load();
