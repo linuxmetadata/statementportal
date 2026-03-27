@@ -14,6 +14,11 @@ const PORT = process.env.PORT || 3000;
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
+// ✅ FIX ROOT ROUTE
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
 app.use(session({
   secret: 'secret123',
   resave: false,
@@ -54,13 +59,7 @@ let saved = [];
 if (fs.existsSync('data.json')) {
   try {
     const content = fs.readFileSync('data.json', 'utf8');
-
-    if (content.trim()) {
-      saved = JSON.parse(content);
-    } else {
-      saved = [];
-    }
-
+    saved = content.trim() ? JSON.parse(content) : [];
   } catch (err) {
     console.log("❌ data.json corrupted, resetting...");
     saved = [];
@@ -124,14 +123,12 @@ async function loadExcel() {
         Code: r["Code"] || "",
         Name: r["Stockist Name"] || "",
 
-        // ✅ EMAIL FILTER FIX
         BH_Email: r["BH_Email"] || "",
         SM_Email: r["SM_Email"] || "",
         ZBM_Email: r["ZBM_Email"] || "",
         RBM_Email: r["RBM_Email"] || "",
         ABM_Email: r["ABM_Email"] || "",
 
-        // ✅ PERSISTED DATA
         Value: old.Value || "",
 
         SSS: old.SSS || false,
@@ -244,7 +241,6 @@ app.post('/uploadFile', upload.single('file'), async (req, res) => {
       }
     }
 
-    // ✅ FILE NAME FIX
     const safe = row.Name.replace(/[^a-zA-Z0-9]/g, "_");
     const newName = `${safe}_${row.Code}_${type}${ext}`;
 
