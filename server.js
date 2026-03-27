@@ -14,7 +14,6 @@ const PORT = process.env.PORT || 3000;
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
-// ✅ ROOT FIX
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
@@ -49,61 +48,34 @@ const auth = new google.auth.GoogleAuth({
 });
 
 const drive = google.drive({ version: 'v3', auth });
-const FOLDER_ID = '168KzEusKlXsHQ-votUNTNA9g0VIai4X-';
 
 // ================= DATA =================
 let DATA = [];
 let saved = [];
 
-// SAFE LOAD
 if (fs.existsSync('data.json')) {
   try {
     const content = fs.readFileSync('data.json', 'utf8');
     saved = content.trim() ? JSON.parse(content) : [];
-  } catch (err) {
-    console.log("❌ data.json corrupted, resetting...");
+  } catch {
     saved = [];
   }
 }
 
-// SAVE
 function saveToFile() {
   fs.writeFileSync('data.json', JSON.stringify(DATA, null, 2));
 }
 
-// ================= LOAD EXCEL =================
+// ================= LOAD EXCEL (LOCAL ONLY NOW) =================
 async function loadExcel() {
   try {
 
-    const list = await drive.files.list({
-      q: `'${FOLDER_ID}' in parents`,
-      orderBy: 'createdTime desc',
-      pageSize: 1,
-      fields: 'files(id, name)',
-      supportsAllDrives: true,
-      includeItemsFromAllDrives: true
-    });
-
-    if (!list.data.files.length) {
-      console.log("❌ No Excel found");
+    if (!fs.existsSync('source.xlsx')) {
+      console.log("❌ No local Excel file (source.xlsx)");
       return;
     }
 
-    const file = list.data.files[0];
-    console.log("✅ Using Excel:", file.name);
-
-    const dest = fs.createWriteStream("temp.xlsx");
-
-    const res = await drive.files.get(
-      { fileId: file.id, alt: 'media', supportsAllDrives: true },
-      { responseType: 'stream' }
-    );
-
-    await new Promise((resolve, reject) => {
-      res.data.pipe(dest).on('finish', resolve).on('error', reject);
-    });
-
-    const wb = XLSX.readFile("temp.xlsx");
+    const wb = XLSX.readFile("source.xlsx");
     const sheet = wb.Sheets[wb.SheetNames[0]];
     const raw = XLSX.utils.sheet_to_json(sheet, { defval: "" });
 
@@ -145,8 +117,6 @@ async function loadExcel() {
       };
 
     }).filter(r => r.Code && r.Name);
-
-    fs.unlinkSync("temp.xlsx");
 
     console.log("✅ Loaded rows:", DATA.length);
 
@@ -210,7 +180,7 @@ app.post('/saveValue', (req, res) => {
   res.json({ status: "saved" });
 });
 
-// ================= UPLOAD =================
+// ================= UPLOAD (FIXED) =================
 app.post('/uploadFile', upload.single('file'), async (req, res) => {
 
   try {
@@ -244,18 +214,17 @@ app.post('/uploadFile', upload.single('file'), async (req, res) => {
     const safe = row.Name.replace(/[^a-zA-Z0-9]/g, "_");
     const newName = `${safe}_${row.Code}_${type}${ext}`;
 
+    // ✅ NO FOLDER (IMPORTANT FIX)
     const uploadRes = await drive.files.create({
-      requestBody: { name: newName, parents: [FOLDER_ID] },
-      media: { body: fs.createReadStream(file.path) },
-      supportsAllDrives: true
+      requestBody: { name: newName },
+      media: { body: fs.createReadStream(file.path) }
     });
 
     const fileId = uploadRes.data.id;
 
     await drive.permissions.create({
       fileId,
-      requestBody: { role: 'reader', type: 'anyone' },
-      supportsAllDrives: true
+      requestBody: { role: 'reader', type: 'anyone' }
     });
 
     const link = `https://drive.google.com/uc?id=${fileId}`;
@@ -276,7 +245,6 @@ app.post('/uploadFile', upload.single('file'), async (req, res) => {
     console.log("❌ FULL UPLOAD ERROR:");
     console.log(err);
 
-    // ✅ FIXED CATCH BLOCK (SHOW REAL ERROR)
     res.json({
       status: "error",
       msg: err.message || "Upload failed"
@@ -310,12 +278,6 @@ app.get('/viewFile', (req, res) => {
   const { code, type } = req.query;
   let row = DATA.find(r => r.Code == code);
   res.redirect(row[`${type}_File`]);
-});
-
-// ================= REFRESH =================
-app.get('/refreshData', async (req, res) => {
-  await loadExcel();
-  res.send("refreshed");
 });
 
 // ================= START =================
