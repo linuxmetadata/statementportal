@@ -8,34 +8,16 @@ const fs = require('fs');
 const xlsx = require('xlsx');
 const pdfParse = require('pdf-parse');
 const archiver = require('archiver');
-const mongoose = require('mongoose');
 
 const app = express();
 const upload = multer({ dest: 'uploads/' });
 
-// ================= PORT =================
 const PORT = process.env.PORT || 3000;
 
 // ================= ENV =================
 const FOLDER_ID = process.env.FOLDER_ID;
 const EXCEL_FILE_ID = process.env.EXCEL_FILE_ID;
-
-// ================= MONGODB =================
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB Connected"))
-  .catch(err => console.log("❌ DB Error:", err));
-
-// ================= SCHEMA =================
-const UploadSchema = new mongoose.Schema({
-  code: String,
-  type: String,
-  files: Array,
-  value: String,
-  uploadedBy: String,
-  uploadedAt: String
-});
-
-const Upload = mongoose.model('Upload', UploadSchema);
+const JSON_FILE_NAME = "updates.json";
 
 // ================= GOOGLE DRIVE =================
 if (!process.env.GOOGLE_CREDENTIALS) {
@@ -86,7 +68,7 @@ app.post('/userLogin', (req, res) => {
   res.json({ status: 'success' });
 });
 
-// ================= DOWNLOAD EXCEL =================
+// ================= EXCEL =================
 async function downloadExcel() {
   try {
     const dest = fs.createWriteStream('temp.xlsx');
@@ -113,16 +95,66 @@ async function downloadExcel() {
   }
 }
 
-// ================= MERGE =================
-function convertToMap(dbData) {
-  let map = {};
-  dbData.forEach(d => {
-    const key = `${d.code}_${d.type}`;
-    map[key] = d;
+// ================= JSON FILE =================
+async function getUpdatesFile() {
+
+  const res = await drive.files.list({
+    q: `name='${JSON_FILE_NAME}' and '${FOLDER_ID}' in parents and trashed=false`,
+    fields: 'files(id)'
   });
-  return map;
+
+  if (res.data.files.length === 0) {
+
+    const file = await drive.files.create({
+      resource: {
+        name: JSON_FILE_NAME,
+        parents: [FOLDER_ID]
+      },
+      media: {
+        mimeType: 'application/json',
+        body: Buffer.from(JSON.stringify({}))
+      },
+      fields: 'id'
+    });
+
+    return file.data.id;
+  }
+
+  return res.data.files[0].id;
 }
 
+async function readUpdates() {
+
+  const fileId = await getUpdatesFile();
+
+  const res = await drive.files.get(
+    { fileId, alt: 'media' },
+    { responseType: 'stream' }
+  );
+
+  let data = '';
+
+  return new Promise((resolve, reject) => {
+    res.data.on('data', chunk => data += chunk);
+    res.data.on('end', () => resolve(JSON.parse(data || "{}")));
+    res.data.on('error', reject);
+  });
+}
+
+async function writeUpdates(content) {
+
+  const fileId = await getUpdatesFile();
+
+  await drive.files.update({
+    fileId,
+    media: {
+      mimeType: 'application/json',
+      body: Buffer.from(JSON.stringify(content))
+    }
+  });
+}
+
+// ================= MERGE =================
 function mergeData(master, updates) {
   return master.map(row => {
 
@@ -181,20 +213,10 @@ app.get('/getData', async (req, res) => {
 
   if (!req.session.user) return res.status(401).send("Login required");
 
+  const updates = await readUpdates();
   const master = await downloadExcel();
-  const dbData = await Upload.find();
-  const updates = convertToMap(dbData);
 
   let rows = mergeData(master, updates);
-
-  if (req.session.role !== 'admin') {
-    const email = req.session.user;
-
-    rows = rows.filter(row =>
-      [row.BH_Email, row.SM_Email, row.ZBM_Email, row.RBM_Email, row.ABM_Email]
-        .some(e => e && e.toLowerCase().includes(email))
-    );
-  }
 
   res.json({ rows, uploads: updates, role: req.session.role });
 });
@@ -224,8 +246,12 @@ app.post('/uploadFile', upload.array('files', 10), async (req, res) => {
 
   if (!value) return res.json({ status: 'error', msg: 'Value required' });
 
-  const exists = await Upload.findOne({ code, type });
-  if (exists) return res.json({ status: 'error', msg: `${type} already uploaded` });
+  let updates = await readUpdates();
+  const key = `${code}_${type}`;
+
+  if (updates[key]) {
+    return res.json({ status: 'error', msg: `${type} already uploaded` });
+  }
 
   const master = await downloadExcel();
   const row = master.find(r => r.Code === code);
@@ -273,14 +299,14 @@ app.post('/uploadFile', upload.array('files', 10), async (req, res) => {
       });
     }
 
-    await Upload.create({
-      code,
-      type,
+    updates[key] = {
       files: uploadedFiles,
       value,
       uploadedBy: req.session.user,
       uploadedAt: new Date().toLocaleString()
-    });
+    };
+
+    await writeUpdates(updates);
 
     res.json({ status: 'success' });
 
@@ -295,9 +321,8 @@ app.get('/downloadReport', async (req, res) => {
 
   if (req.session.role !== 'admin') return res.send("Admin only");
 
+  const updates = await readUpdates();
   const master = await downloadExcel();
-  const dbData = await Upload.find();
-  const updates = convertToMap(dbData);
 
   const merged = mergeData(master, updates);
 
@@ -308,42 +333,6 @@ app.get('/downloadReport', async (req, res) => {
   xlsx.writeFile(wb, "report.xlsx");
 
   res.download("report.xlsx");
-});
-
-// ================= DOWNLOAD ZIP =================
-app.get('/downloadZip', async (req, res) => {
-
-  if (req.session.role !== 'admin') return res.send("Admin only");
-
-  const dbData = await Upload.find();
-  const master = await downloadExcel();
-
-  res.attachment('files.zip');
-  const archive = archiver('zip');
-
-  archive.pipe(res);
-
-  for (let d of dbData) {
-
-    const row = master.find(r => r.Code === d.code);
-    const state = row?.State || "Others";
-
-    for (let file of d.files) {
-
-      const fileId = file.fileUrl.split('/d/')[1].split('/')[0];
-
-      const response = await drive.files.get(
-        { fileId, alt: 'media' },
-        { responseType: 'stream' }
-      );
-
-      archive.append(response.data, {
-        name: `${state}/${d.type}/${file.fileName}`
-      });
-    }
-  }
-
-  await archive.finalize();
 });
 
 // ================= START =================
