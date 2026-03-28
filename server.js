@@ -3,6 +3,7 @@ const session = require('express-session');
 const multer = require('multer');
 const { google } = require('googleapis');
 const fs = require('fs');
+const xlsx = require('xlsx');
 
 const app = express();
 const upload = multer({ dest: 'uploads/' });
@@ -33,22 +34,17 @@ const oauth2Client = new google.auth.OAuth2(
   REDIRECT_URI
 );
 
-// ================= STORAGE (IMPORTANT) =================
-let uploadsData = {}; 
-// format:
-// uploadsData["AP183_SSS"] = {
-//   fileName,
-//   fileId,
-//   uploadedBy,
-//   uploadedAt
-// }
+// ================= STORAGE =================
+let uploadsData = {};
+let excelData = []; // 🔥 STORE EXCEL DATA
 
 // ================= ADMIN LOGIN =================
 app.post('/login', (req, res) => {
   const { username, password } = req.body;
 
-  if (username === 'admin' && password === 'admin') {
-    req.session.user = username;
+  if (username === 'admin' && password === 'admin123') {
+    req.session.user = 'Admin';
+    req.session.role = 'admin';
     return res.json({ status: 'success' });
   }
 
@@ -60,7 +56,10 @@ app.get('/auth', (req, res) => {
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
-    scope: ['https://www.googleapis.com/auth/drive']
+    scope: [
+      'https://www.googleapis.com/auth/drive',
+      'https://www.googleapis.com/auth/userinfo.email'
+    ]
   });
 
   res.redirect(url);
@@ -74,52 +73,97 @@ app.get('/oauth2callback', async (req, res) => {
     const { tokens } = await oauth2Client.getToken(code);
 
     oauth2Client.setCredentials(tokens);
+
+    const oauth2 = google.oauth2({ auth: oauth2Client, version: 'v2' });
+    const userInfo = await oauth2.userinfo.get();
+
     req.session.tokens = tokens;
+    req.session.user = userInfo.data.email.toLowerCase();
+    req.session.role = 'user';
 
     res.redirect('/dashboard.html');
 
   } catch (err) {
-    console.log("❌ OAuth Error:", err.message);
     res.send("Login failed: " + err.message);
   }
 });
 
 // ================= AUTH =================
 function checkAuth(req, res, next) {
-  if (!req.session.tokens) {
-    return res.status(401).json({ status: 'error', msg: 'Not authenticated' });
+  if (!req.session.user) {
+    return res.status(401).json({ msg: 'Not logged in' });
   }
 
-  oauth2Client.setCredentials(req.session.tokens);
+  if (req.session.tokens) {
+    oauth2Client.setCredentials(req.session.tokens);
+  }
+
   next();
 }
 
-// ================= GET DATA =================
-app.get('/getData', (req, res) => {
-  res.json({ status: 'success', uploads: uploadsData });
+// ================= UPLOAD EXCEL =================
+app.post('/uploadExcel', upload.single('file'), (req, res) => {
+  try {
+    const wb = xlsx.readFile(req.file.path);
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    excelData = xlsx.utils.sheet_to_json(sheet);
+
+    fs.unlinkSync(req.file.path);
+
+    res.json({ status: 'success' });
+
+  } catch (err) {
+    res.json({ status: 'error', msg: err.message });
+  }
 });
 
-// ================= UPLOAD =================
+// ================= FILTER DATA =================
+app.get('/getData', checkAuth, (req, res) => {
+
+  // ADMIN → ALL DATA
+  if (req.session.role === 'admin') {
+    return res.json({
+      rows: excelData,
+      uploads: uploadsData
+    });
+  }
+
+  const userEmail = req.session.user;
+
+  const filtered = excelData.filter(row => {
+
+    const emails = [
+      row.BH_Email,
+      row.SM_Email,
+      row.ZBM_Email,
+      row.RBM_Email,
+      row.ABM_Email
+    ];
+
+    return emails.some(e =>
+      e && e.toLowerCase().includes(userEmail)
+    );
+  });
+
+  res.json({
+    rows: filtered,
+    uploads: uploadsData
+  });
+});
+
+// ================= UPLOAD FILE =================
 app.post('/uploadFile', checkAuth, upload.single('file'), async (req, res) => {
   try {
     const file = req.file;
     const { code, type, stockistName } = req.body;
 
-    if (!file) {
-      return res.json({ status: 'error', msg: 'No file uploaded' });
-    }
-
     const key = `${code}_${type}`;
 
-    // prevent re-upload
     if (uploadsData[key]) {
       return res.json({ status: 'error', msg: 'Already uploaded' });
     }
 
-    const cleanName = stockistName
-      .replace(/[^a-zA-Z0-9 ]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
+    const cleanName = stockistName.replace(/[^a-zA-Z0-9 ]/g, '').trim();
 
     const finalName = `${cleanName}_${code}_${type}${file.originalname.substring(file.originalname.lastIndexOf('.'))}`;
 
@@ -139,44 +183,23 @@ app.post('/uploadFile', checkAuth, upload.single('file'), async (req, res) => {
 
     fs.unlinkSync(file.path);
 
-    // SAVE DATA
     uploadsData[key] = {
       fileName: finalName,
       fileId: response.data.id,
-      uploadedBy: req.session.user || "Admin",
+      uploadedBy: req.session.user,
       uploadedAt: new Date().toLocaleString()
     };
 
     res.json({ status: 'success' });
 
   } catch (err) {
-    console.log("❌ Upload Error:", err.message);
     res.json({ status: 'error', msg: err.message });
-  }
-});
-
-// ================= DOWNLOAD =================
-app.get('/download/:id', checkAuth, async (req, res) => {
-  try {
-    const drive = google.drive({ version: 'v3', auth: oauth2Client });
-
-    const file = await drive.files.get({
-      fileId: req.params.id,
-      alt: 'media'
-    }, { responseType: 'stream' });
-
-    file.data.pipe(res);
-
-  } catch (err) {
-    res.send(err.message);
   }
 });
 
 // ================= LOGOUT =================
 app.get('/logout', (req, res) => {
-  req.session.destroy(() => {
-    res.redirect('/login.html');
-  });
+  req.session.destroy(() => res.redirect('/login.html'));
 });
 
 // ================= DEFAULT =================
@@ -184,7 +207,6 @@ app.get('/', (req, res) => {
   res.redirect('/login.html');
 });
 
-// ================= START =================
 app.listen(PORT, () => {
   console.log("🚀 Server running...");
 });

@@ -1,21 +1,53 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Statement Portal Login</title>
+  <title>Login</title>
 </head>
-<body style="font-family: Arial; text-align:center; margin-top:100px;">
 
-  <h2>Statement Portal</h2>
+<body style="text-align:center; margin-top:100px;">
 
-  <button onclick="login()" style="padding:15px 30px; font-size:18px;">
-    Login with Google
-  </button>
+<h2>Statement Portal Login</h2>
 
-  <script>
-    function login() {
-      window.location.href = "/auth";
-    }
-  </script>
+<!-- ADMIN LOGIN -->
+<div>
+  <h3>Admin Login</h3>
+  <input id="username" placeholder="Username"><br><br>
+  <input id="password" type="password" placeholder="Password"><br><br>
+  <button onclick="adminLogin()">Login</button>
+</div>
+
+<br><br>
+
+<!-- USER LOGIN -->
+<div>
+  <h3>User Login</h3>
+  <button onclick="googleLogin()">Login with Email</button>
+</div>
+
+<script>
+async function adminLogin() {
+  const res = await fetch('/login', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      username: document.getElementById('username').value,
+      password: document.getElementById('password').value
+    })
+  });
+
+  const result = await res.json();
+
+  if (result.status === 'success') {
+    location.href = '/dashboard.html';
+  } else {
+    alert(result.msg);
+  }
+}
+
+function googleLogin() {
+  window.location.href = '/auth';
+}
+</script>
 
 </body>
 </html>
