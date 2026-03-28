@@ -2,111 +2,20 @@
 <html>
 <head>
   <title>Statement Portal Login</title>
-  <style>
-    body {
-      font-family: Arial;
-      background: #f0f2f5;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-    }
-    .box {
-      background: white;
-      padding: 30px;
-      border-radius: 10px;
-      width: 300px;
-      text-align: center;
-      box-shadow: 0 0 10px #ccc;
-    }
-    input, select {
-      width: 100%;
-      padding: 10px;
-      margin: 10px 0;
-    }
-    button {
-      width: 100%;
-      padding: 10px;
-      background: #007bff;
-      color: white;
-      border: none;
-      cursor: pointer;
-    }
-  </style>
 </head>
+<body style="font-family: Arial; text-align:center; margin-top:100px;">
 
-<body>
+  <h2>Statement Portal</h2>
 
-<div class="box">
-  <h2>Statement Portal Login</h2>
+  <button onclick="login()" style="padding:15px 30px; font-size:18px;">
+    Login with Google
+  </button>
 
-  <select id="type" onchange="toggleLogin()">
-    <option value="user">User Login</option>
-    <option value="admin">Admin Login</option>
-  </select>
-
-  <div id="userDiv">
-    <input type="text" id="email" placeholder="Enter Email">
-  </div>
-
-  <div id="adminDiv" style="display:none;">
-    <input type="text" id="username" placeholder="Username">
-    <input type="password" id="password" placeholder="Password">
-  </div>
-
-  <button onclick="login()">Login</button>
-</div>
-
-<script>
-
-function toggleLogin(){
-  const type = document.getElementById("type").value;
-
-  if(type === "admin"){
-    document.getElementById("adminDiv").style.display = "block";
-    document.getElementById("userDiv").style.display = "none";
-  } else {
-    document.getElementById("adminDiv").style.display = "none";
-    document.getElementById("userDiv").style.display = "block";
-  }
-}
-
-async function login(){
-
-  const type = document.getElementById("type").value;
-
-  let body = {};
-
-  if(type === "admin"){
-    body = {
-      type,
-      username: document.getElementById("username").value,
-      password: document.getElementById("password").value
-    };
-  } else {
-    body = {
-      type,
-      email: document.getElementById("email").value
-    };
-  }
-
-  const res = await fetch('/login',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(body),
-    credentials: 'include'
-  });
-
-  const text = await res.text();
-
-  if(text === "success"){
-    window.location.href = "/dashboard.html";
-  } else {
-    alert("Invalid Login");
-  }
-}
-
-</script>
+  <script>
+    function login() {
+      window.location.href = "/auth";
+    }
+  </script>
 
 </body>
 </html>
