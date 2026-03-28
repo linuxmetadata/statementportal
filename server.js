@@ -10,13 +10,16 @@ const upload = multer({ dest: 'uploads/' });
 
 const PORT = process.env.PORT || 3000;
 
-// ================= ENV =================
-const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
-const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI;
-
-// 👉 Your Drive Folder
+// ================= CONFIG =================
 const FOLDER_ID = '168KzEusKlXsHQ-votUNTNA9g0VIai4X-';
+
+// 👉 Service Account (recommended)
+const auth = new google.auth.GoogleAuth({
+  keyFile: 'service-account.json', // upload this file
+  scopes: ['https://www.googleapis.com/auth/drive']
+});
+
+const drive = google.drive({ version: 'v3', auth });
 
 // ================= MIDDLEWARE =================
 app.use(express.json());
@@ -30,18 +33,11 @@ app.use(session({
 
 app.use(express.static('public'));
 
-// ================= GOOGLE AUTH =================
-const oauth2Client = new google.auth.OAuth2(
-  CLIENT_ID,
-  CLIENT_SECRET,
-  REDIRECT_URI
-);
-
 // ================= STORAGE =================
 let excelData = [];
 let uploadsData = {};
 
-// ================= ROOT FIX =================
+// ================= ROOT =================
 app.get('/', (req, res) => {
   if (!req.session.user) {
     res.redirect('/login.html');
@@ -51,7 +47,7 @@ app.get('/', (req, res) => {
 });
 
 // ================= ADMIN LOGIN =================
-app.post('/login', (req, res) => {
+app.post('/adminLogin', (req, res) => {
   const { username, password } = req.body;
 
   if (username === 'admin' && password === 'admin123') {
@@ -63,52 +59,25 @@ app.post('/login', (req, res) => {
   res.json({ status: 'error', msg: 'Invalid Login' });
 });
 
-// ================= GOOGLE LOGIN =================
-app.get('/auth', (req, res) => {
-  const url = oauth2Client.generateAuthUrl({
-    access_type: 'offline',
-    prompt: 'consent',
-    scope: [
-      'https://www.googleapis.com/auth/userinfo.email',
-      'https://www.googleapis.com/auth/drive'
-    ]
-  });
+// ================= USER LOGIN =================
+app.post('/userLogin', (req, res) => {
+  const { email } = req.body;
 
-  res.redirect(url);
-});
-
-// ================= CALLBACK =================
-app.get('/oauth2callback', async (req, res) => {
-  try {
-    const code = req.query.code;
-
-    const { tokens } = await oauth2Client.getToken(code);
-    oauth2Client.setCredentials(tokens);
-
-    const oauth2 = google.oauth2({ auth: oauth2Client, version: 'v2' });
-    const user = await oauth2.userinfo.get();
-
-    req.session.tokens = tokens;
-    req.session.user = user.data.email.toLowerCase();
-    req.session.role = 'user';
-
-    res.redirect('/dashboard.html');
-
-  } catch (err) {
-    res.send("Login failed: " + err.message);
+  if (!email) {
+    return res.json({ status: 'error', msg: 'Enter email' });
   }
+
+  req.session.user = email.toLowerCase();
+  req.session.role = 'user';
+
+  res.json({ status: 'success' });
 });
 
-// ================= AUTH CHECK =================
+// ================= AUTH =================
 function checkAuth(req, res, next) {
   if (!req.session.user) {
     return res.status(401).json({ msg: 'Not logged in' });
   }
-
-  if (req.session.tokens) {
-    oauth2Client.setCredentials(req.session.tokens);
-  }
-
   next();
 }
 
@@ -131,7 +100,6 @@ app.post('/uploadExcel', upload.single('file'), (req, res) => {
 // ================= GET DATA =================
 app.get('/getData', checkAuth, (req, res) => {
 
-  // ADMIN → ALL DATA
   if (req.session.role === 'admin') {
     return res.json({ rows: excelData, uploads: uploadsData });
   }
@@ -159,17 +127,13 @@ app.post('/uploadFile', checkAuth, upload.single('file'), async (req, res) => {
 
     const key = `${code}_${type}`;
 
-    // 🔒 Prevent duplicate upload
     if (uploadsData[key]) {
       return res.json({ status: 'error', msg: 'Already uploaded' });
     }
 
-    // 🔥 FILE NAME FORMAT
-    const cleanName = stockistName.replace(/[^a-zA-Z0-9 ]/g, '').trim();
+    const clean = stockistName.replace(/[^a-zA-Z0-9 ]/g, '').trim();
 
-    const fileName = `${cleanName}_${code}_${type}${file.originalname.substring(file.originalname.lastIndexOf('.'))}`;
-
-    const drive = google.drive({ version: 'v3', auth: oauth2Client });
+    const fileName = `${clean}_${code}_${type}${file.originalname.substring(file.originalname.lastIndexOf('.'))}`;
 
     const response = await drive.files.create({
       resource: {
@@ -185,7 +149,6 @@ app.post('/uploadFile', checkAuth, upload.single('file'), async (req, res) => {
 
     fs.unlinkSync(file.path);
 
-    // 📊 STORE META
     uploadsData[key] = {
       fileName,
       fileId: response.data.id,
@@ -202,9 +165,7 @@ app.post('/uploadFile', checkAuth, upload.single('file'), async (req, res) => {
 
 // ================= LOGOUT =================
 app.get('/logout', (req, res) => {
-  req.session.destroy(() => {
-    res.redirect('/login.html');
-  });
+  req.session.destroy(() => res.redirect('/login.html'));
 });
 
 // ================= START =================
