@@ -51,13 +51,11 @@ app.get('/oauth2callback', async (req, res) => {
     oauth2Client.setCredentials(tokens);
     req.session.tokens = tokens;
 
-    console.log("✅ OAuth Login Success");
-
     res.redirect('/dashboard.html');
 
   } catch (err) {
-    console.log("❌ OAuth Error:", err.message);
-    res.send("Login failed");
+    console.log("❌ OAuth Error:", err);
+    res.send("Login failed: " + err.message);
   }
 });
 
