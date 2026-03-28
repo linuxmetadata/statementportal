@@ -1,73 +1,80 @@
 const express = require('express');
-const XLSX = require('xlsx');
-const fs = require('fs');
-const path = require('path');
 const session = require('express-session');
 const multer = require('multer');
-const pdfParse = require('pdf-parse');
+const fs = require('fs');
+const path = require('path');
+const XLSX = require('xlsx');
 const { google } = require('googleapis');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ================= BASIC =================
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static('public'));
 app.use(express.json());
 
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'login.html'));
-});
-
 app.use(session({
-  secret: 'secret123',
+  secret: 'statementportal_secret',
   resave: false,
   saveUninitialized: true
 }));
 
+// ================= FILE UPLOAD =================
 const upload = multer({ dest: 'uploads/' });
 
-// ================= GOOGLE DRIVE =================
-let creds;
+// ================= OAUTH =================
+const oauth2Client = new google.auth.OAuth2(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+  process.env.GOOGLE_REDIRECT_URI
+);
 
-try {
-  if (!process.env.GOOGLE_CREDENTIALS) {
-    throw new Error("Missing GOOGLE_CREDENTIALS");
-  }
+const SCOPES = ['https://www.googleapis.com/auth/drive'];
 
-  creds = JSON.parse(process.env.GOOGLE_CREDENTIALS);
-  creds.private_key = creds.private_key.replace(/\\n/g, '\n');
-
-} catch (err) {
-  console.log("❌ GOOGLE_CREDENTIALS ERROR:", err.message);
-  process.exit(1);
-}
-
-const auth = new google.auth.GoogleAuth({
-  credentials: creds,
-  scopes: ['https://www.googleapis.com/auth/drive']
+// ================= LOGIN =================
+app.get('/auth', (req, res) => {
+  const url = oauth2Client.generateAuthUrl({
+    access_type: 'offline',
+    scope: SCOPES,
+    prompt: 'consent'
+  });
+  res.redirect(url);
 });
 
-const drive = google.drive({ version: 'v3', auth });
-
-// ================= DATA =================
-let DATA = [];
-let saved = [];
-
-if (fs.existsSync('data.json')) {
+// ================= CALLBACK =================
+app.get('/oauth2callback', async (req, res) => {
   try {
-    const content = fs.readFileSync('data.json', 'utf8');
-    saved = content.trim() ? JSON.parse(content) : [];
-  } catch {
-    saved = [];
+    const code = req.query.code;
+
+    const { tokens } = await oauth2Client.getToken(code);
+
+    oauth2Client.setCredentials(tokens);
+    req.session.tokens = tokens;
+
+    console.log("✅ OAuth Login Success");
+
+    res.redirect('/dashboard.html');
+
+  } catch (err) {
+    console.log("❌ OAuth Error:", err.message);
+    res.send("Login failed");
   }
+});
+
+// ================= DRIVE =================
+function getDrive(req) {
+  oauth2Client.setCredentials(req.session.tokens);
+  return google.drive({ version: 'v3', auth: oauth2Client });
 }
 
-function saveToFile() {
-  fs.writeFileSync('data.json', JSON.stringify(DATA, null, 2));
-}
+// ================= DATA STORAGE =================
+let DATA = [];
 
-async function loadExcel() {
+// ================= LOAD SOURCE EXCEL =================
+async function loadExcelFromDrive(req) {
   try {
+
+    const drive = getDrive(req);
 
     const list = await drive.files.list({
       pageSize: 1,
@@ -80,161 +87,130 @@ async function loadExcel() {
     }
 
     const file = list.data.files[0];
-    console.log("✅ Using Excel:", file.name);
 
-    const dest = fs.createWriteStream("temp.xlsx");
+    const tempPath = path.join(__dirname, 'temp.xlsx');
+    const dest = fs.createWriteStream(tempPath);
 
-    const res = await drive.files.get(
+    const response = await drive.files.get(
       { fileId: file.id, alt: 'media' },
       { responseType: 'stream' }
     );
 
     await new Promise((resolve, reject) => {
-      res.data.pipe(dest).on('finish', resolve).on('error', reject);
+      response.data
+        .pipe(dest)
+        .on('finish', resolve)
+        .on('error', reject);
     });
 
-    const wb = XLSX.readFile("temp.xlsx");
-    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const workbook = XLSX.readFile(tempPath);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const raw = XLSX.utils.sheet_to_json(sheet, { defval: "" });
 
-    DATA = raw.map(row => ({
-      STATE: row["STATE"] || "",
-      BM_HQ: row["BM_HQ"] || "",
-      Code: row["Code"] || "",
-      Name: row["Stockist Name"] || "",
+    DATA = raw.map(r => ({
+      STATE: r["STATE"] || "",
+      BM_HQ: r["BM_HQ"] || "",
+      Code: r["Code"] || "",
+      Name: r["Stockist Name"] || "",
       Value: "",
-      SSS: false,
-      AWS: false
+      SSS_File: "",
+      AWS_File: "",
+      SSS_Status: "Pending",
+      AWS_Status: "Pending",
+      Submitted_By: "",
+      Submitted_On: ""
     }));
 
-    fs.unlinkSync("temp.xlsx");
+    fs.unlinkSync(tempPath);
 
-    console.log("✅ Data Loaded:", DATA.length);
+    console.log("✅ Excel Loaded:", DATA.length);
 
   } catch (err) {
-    console.log("❌ Load error:", err.message);
+    console.log("❌ Excel Load Error:", err.message);
   }
 }
 
-// ================= LOGIN =================
-app.post('/login', (req, res) => {
-
-  const { type, email, username, password } = req.body;
-
-  if (type === "admin") {
-    if (username === "admin" && password === "admin123") {
-      req.session.user = { role: "admin" };
-      return res.send("success");
-    }
-    return res.send("fail");
-  }
-
-  req.session.user = { role: "user", email };
-  res.send("success");
-});
-
 // ================= GET DATA =================
-app.get('/getData', (req, res) => {
+app.get('/getData', async (req, res) => {
+  try {
+    if (!req.session.tokens) {
+      return res.json({ data: [] });
+    }
 
-  if (!req.session.user) {
-    return res.json({ role: "", data: [] });
+    await loadExcelFromDrive(req);
+
+    res.json({ data: DATA });
+
+  } catch (err) {
+    res.json({ data: [] });
   }
-
-  let result = DATA;
-
-  if (req.session.user.role === "user") {
-    const email = req.session.user.email;
-
-    result = DATA.filter(r =>
-      r.BH_Email === email ||
-      r.SM_Email === email ||
-      r.ZBM_Email === email ||
-      r.RBM_Email === email ||
-      r.ABM_Email === email
-    );
-  }
-
-  res.json({ role: req.session.user.role, data: result });
 });
 
-// ================= SAVE VALUE =================
-app.post('/saveValue', (req, res) => {
-
-  const { code, value } = req.body;
-
-  DATA.forEach(r => {
-    if (r.Code == code) r.Value = value;
-  });
-
-  saveToFile();
-
-  res.json({ status: "saved" });
-});
-
-// ================= UPLOAD (FIXED) =================
+// ================= UPLOAD FILE =================
 app.post('/uploadFile', upload.single('file'), async (req, res) => {
-
   try {
 
-    const { code, type } = req.body;
+    if (!req.session.tokens) {
+      return res.json({ status: "error", msg: "Login required" });
+    }
+
+    const drive = getDrive(req);
+
     const file = req.file;
+    const code = req.body.code;
+    const type = req.body.type; // SSS or AWS
 
-    let row = DATA.find(r => r.Code == code);
-
-    if (!row.Value || row.Value.trim() === "") {
-      fs.unlinkSync(file.path);
-      return res.json({ status: "error", msg: "Enter Value first" });
+    if (!file) {
+      return res.json({ status: "error", msg: "No file selected" });
     }
 
-    const ext = path.extname(file.originalname).toLowerCase();
-    const allowed = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.txt', '.html'];
-
-    if (!allowed.includes(ext)) {
-      fs.unlinkSync(file.path);
-      return res.json({ status: "error", msg: "Invalid format" });
-    }
-
-    if (ext === '.pdf') {
-      const parsed = await pdfParse(fs.readFileSync(file.path));
-      if (!parsed.text || parsed.text.trim().length < 10) {
-        fs.unlinkSync(file.path);
-        return res.json({ status: "error", msg: "Invalid PDF" });
-      }
-    }
-
-    const safe = row.Name.replace(/[^a-zA-Z0-9]/g, "_");
-    const newName = `${safe}_${row.Code}_${type}${ext}`;
-
-    // ✅ NO FOLDER (IMPORTANT FIX)
+    // Upload to Google Drive
     const uploadRes = await drive.files.create({
-      requestBody: { name: newName },
-      media: { body: fs.createReadStream(file.path) }
+      requestBody: {
+        name: `${type}_${code}_${file.originalname}`
+      },
+      media: {
+        body: fs.createReadStream(file.path)
+      }
     });
 
     const fileId = uploadRes.data.id;
 
+    // Make public
     await drive.permissions.create({
       fileId,
-      requestBody: { role: 'reader', type: 'anyone' }
+      requestBody: {
+        role: 'reader',
+        type: 'anyone'
+      }
     });
 
-    const link = `https://drive.google.com/uc?id=${fileId}`;
+    const fileLink = `https://drive.google.com/file/d/${fileId}/view`;
+
+    // Update DATA
+    const row = DATA.find(r => r.Code === code);
+
+    if (row) {
+      if (type === "SSS") {
+        row.SSS_File = fileLink;
+        row.SSS_Status = "Uploaded";
+      } else {
+        row.AWS_File = fileLink;
+        row.AWS_Status = "Uploaded";
+      }
+
+      row.Submitted_By = "Admin";
+      row.Submitted_On = new Date().toLocaleString();
+    }
 
     fs.unlinkSync(file.path);
 
-    row[type] = true;
-    row[`${type}_File`] = link;
-    row[`${type}_Submitted_By`] = req.session.user.email || "admin";
-    row[`${type}_Date`] = new Date().toLocaleString();
-
-    saveToFile();
+    console.log("✅ Upload Success:", file.originalname);
 
     res.json({ status: "success" });
 
   } catch (err) {
-
-    console.log("❌ FULL UPLOAD ERROR:");
-    console.log(err);
+    console.log("❌ Upload Error:", err.message);
 
     res.json({
       status: "error",
@@ -243,36 +219,31 @@ app.post('/uploadFile', upload.single('file'), async (req, res) => {
   }
 });
 
-// ================= DELETE =================
-app.post('/deleteFile', (req, res) => {
+// ================= DOWNLOAD REPORT =================
+app.get('/downloadReport', (req, res) => {
+  try {
+    const ws = XLSX.utils.json_to_sheet(DATA);
+    const wb = XLSX.utils.book_new();
 
-  if (req.session.user.role !== "admin") {
-    return res.json({ status: "error" });
+    XLSX.utils.book_append_sheet(wb, ws, "Report");
+
+    const filePath = "report.xlsx";
+
+    XLSX.writeFile(wb, filePath);
+
+    res.download(filePath);
+
+  } catch (err) {
+    res.send("Error generating report");
   }
-
-  const { code, type } = req.body;
-
-  let row = DATA.find(r => r.Code == code);
-
-  row[type] = false;
-  row[`${type}_File`] = "";
-  row[`${type}_Submitted_By`] = "";
-  row[`${type}_Date`] = "";
-
-  saveToFile();
-
-  res.json({ status: "deleted" });
 });
 
-// ================= VIEW =================
-app.get('/viewFile', (req, res) => {
-  const { code, type } = req.query;
-  let row = DATA.find(r => r.Code == code);
-  res.redirect(row[`${type}_File`]);
+// ================= ROOT FIX =================
+app.get('/', (req, res) => {
+  res.redirect('/login.html');
 });
 
 // ================= START =================
-app.listen(PORT, async () => {
-  console.log("🚀 Server running...");
-  await loadExcel();
+app.listen(PORT, () => {
+  console.log("🚀 OAuth Server Running...");
 });
