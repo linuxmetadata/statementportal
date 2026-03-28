@@ -1,154 +1,230 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Statement Portal</title>
+  <title>Dashboard</title>
+
   <style>
     body { font-family: Arial; background:#f5f5f5; padding:20px; }
+
     table { width:100%; border-collapse:collapse; background:#fff; }
     th, td { border:1px solid #ccc; padding:8px; text-align:center; }
+
     th { background:#1976d2; color:#fff; }
-    input { padding:5px; width:90%; }
-    .card { background:#fff; padding:15px; border-radius:10px; width:18%; display:inline-block; margin:5px; text-align:center; }
+
+    input { padding:5px; }
+
+    .search-row input {
+      width: 95%;
+    }
+
+    .card {
+      background:#fff;
+      padding:15px;
+      border-radius:10px;
+      width:18%;
+      display:inline-block;
+      margin:5px;
+      text-align:center;
+      cursor:pointer;
+    }
+
+    .top-bar { display:flex; justify-content:space-between; }
+
+    button {
+      padding:6px 10px;
+      background:#0b3d91;
+      color:#fff;
+      border:none;
+      cursor:pointer;
+    }
   </style>
 </head>
 
 <body>
 
-<h2 style="text-align:center;">Statement Portal</h2>
+<h2>Dashboard</h2>
 
-<!-- SUMMARY -->
-<div id="summary">
-  <div class="card">Total<br><b id="total">0</b></div>
-  <div class="card">SSS Received<br><b id="sssR">0</b></div>
-  <div class="card">SSS Pending<br><b id="sssP">0</b></div>
-  <div class="card">AWS Received<br><b id="awsR">0</b></div>
-  <div class="card">AWS Pending<br><b id="awsP">0</b></div>
+<div class="top-bar">
+  <div id="adminActions">
+    <button onclick="downloadReport()">Report</button>
+    <button onclick="downloadZip()">ZIP</button>
+  </div>
+  <button onclick="logout()">Logout</button>
 </div>
 
 <br>
 
-<!-- FILTER -->
-<tr>
-  <td><input id="f_state" placeholder="State"></td>
-  <td><input id="f_bm" placeholder="BM HQ"></td>
-  <td><input id="f_code" placeholder="Code"></td>
-  <td><input id="f_name" placeholder="Stockist"></td>
+<div id="summary">
+  <div class="card" onclick="setFilter('ALL')">Total<br><b id="total"></b></div>
+  <div class="card" onclick="setFilter('SSS_DONE')">SSS Done<br><b id="sssR"></b></div>
+  <div class="card" onclick="setFilter('SSS_PENDING')">SSS Pending<br><b id="sssP"></b></div>
+  <div class="card" onclick="setFilter('AWS_DONE')">AWS Done<br><b id="awsR"></b></div>
+  <div class="card" onclick="setFilter('AWS_PENDING')">AWS Pending<br><b id="awsP"></b></div>
+</div>
+
+<br><br>
+
+<table>
+<thead>
+
+<!-- 🔍 SEARCH ROW (ABOVE HEADERS) -->
+<tr class="search-row">
+  <th><input placeholder="Search State" oninput="renderTable()"></th>
+  <th><input placeholder="Search BM HQ" oninput="renderTable()"></th>
+  <th><input placeholder="Search Code" oninput="renderTable()"></th>
+  <th><input placeholder="Search Name" oninput="renderTable()"></th>
+  <th></th>
+  <th></th>
+  <th></th>
 </tr>
 
-<br>
+<tr>
+<th>State</th>
+<th>BM HQ</th>
+<th>Code</th>
+<th>Name</th>
+<th>Value</th>
+<th>SSS</th>
+<th>AWS</th>
+</tr>
+</thead>
 
-<table id="table">
-  <thead>
-    <tr>
-      <th>State</th>
-      <th>BM HQ</th>
-      <th>Code</th>
-      <th>Stockist Name</th>
-      <th>SSS</th>
-      <th>AWS</th>
-    </tr>
-  </thead>
-
-  <tbody id="tbody">
-  </tbody>
+<tbody id="tbody"></tbody>
 </table>
 
 <script>
 
-// 🔹 SAMPLE DATA (replace with Excel later)
-const data = [
-  {state:"ANDRA PRADESH", bm:"RAJAHMUNDRY", code:"AP183", name:"LAHARI MEDICAL AGENCIES"},
-  {state:"ANDRA PRADESH", bm:"RAJAHMUNDRY", code:"AP243", name:"ROHINI MEDICAL AGENCIES"},
-  {state:"ANDRA PRADESH", bm:"TIRUPATHI", code:"AP292", name:"HARIKA MEDICAL AGENCIES"}
-];
-
+let data = [];
 let uploads = {};
+let role = "";
+let filterType = "ALL";
 
-// ================= LOAD =================
 async function load() {
 
-  const res = await fetch('/getData');
+  const res = await fetch('/getData', { credentials:'include' });
+
+  if (res.status === 401) {
+    window.location = '/login.html';
+    return;
+  }
+
   const result = await res.json();
-  uploads = result.uploads || {};
+
+  data = result.rows;
+  uploads = result.uploads;
+  role = result.role;
+
+  if (role !== 'admin') {
+    document.getElementById('adminActions').style.display = 'none';
+  }
 
   renderTable();
   updateSummary();
 }
 
-// ================= TABLE =================
-function renderTable() {
+function updateSummary() {
+
+  let sssR=0, sssP=0, awsR=0, awsP=0;
+
+  data.forEach(d=>{
+    d.SSS_Status==="Done"?sssR++:sssP++;
+    d.AWS_Status==="Done"?awsR++:awsP++;
+  });
+
+  total.innerText = data.length;
+  sssR.innerText = sssR;
+  sssP.innerText = sssP;
+  awsR.innerText = awsR;
+  awsP.innerText = awsP;
+}
+
+function setFilter(type){
+  filterType = type;
+  renderTable();
+}
+
+function renderTable(){
 
   const tbody = document.getElementById("tbody");
-  tbody.innerHTML = "";
+  tbody.innerHTML="";
 
-  const f_state = document.getElementById("f_state").value.toLowerCase();
-  const f_bm = document.getElementById("f_bm").value.toLowerCase();
-  const f_code = document.getElementById("f_code").value.toLowerCase();
-  const f_name = document.getElementById("f_name").value.toLowerCase();
+  const inputs = document.querySelectorAll(".search-row input");
 
-  data.forEach(d => {
+  data.forEach(d=>{
 
-    if (
-      d.state.toLowerCase().includes(f_state) &&
-      d.bm.toLowerCase().includes(f_bm) &&
-      d.code.toLowerCase().includes(f_code) &&
-      d.name.toLowerCase().includes(f_name)
-    ) {
+    // 🔍 Column search logic
+    if (inputs[0].value && !d.State.toLowerCase().includes(inputs[0].value.toLowerCase())) return;
+    if (inputs[1].value && !d["BM HQ"].toLowerCase().includes(inputs[1].value.toLowerCase())) return;
+    if (inputs[2].value && !String(d.Code).toLowerCase().includes(inputs[2].value.toLowerCase())) return;
+    if (inputs[3].value && !d["Stockist Name"].toLowerCase().includes(inputs[3].value.toLowerCase())) return;
 
-      const tr = document.createElement("tr");
+    // 🔹 Card filters
+    if(filterType==="SSS_DONE" && d.SSS_Status!=="Done") return;
+    if(filterType==="SSS_PENDING" && d.SSS_Status!=="Pending") return;
+    if(filterType==="AWS_DONE" && d.AWS_Status!=="Done") return;
+    if(filterType==="AWS_PENDING" && d.AWS_Status!=="Pending") return;
 
-      tr.innerHTML = `
-        <td>${d.state}</td>
-        <td>${d.bm}</td>
-        <td>${d.code}</td>
-        <td>${d.name}</td>
-        <td>${renderCell(d, "SSS")}</td>
-        <td>${renderCell(d, "AWS")}</td>
-      `;
+    const tr=document.createElement("tr");
 
-      tbody.appendChild(tr);
-    }
+    tr.innerHTML=`
+      <td>${d.State}</td>
+      <td>${d["BM HQ"]}</td>
+      <td>${d.Code}</td>
+      <td>${d["Stockist Name"]}</td>
+
+      <td><input id="val_${d.Code}" value="${d.SSS_Value || d.AWS_Value || ''}"></td>
+
+      <td>${renderCell(d,'SSS')}</td>
+      <td>${renderCell(d,'AWS')}</td>
+    `;
+
+    tbody.appendChild(tr);
   });
 }
 
-// ================= CELL =================
-function renderCell(d, type) {
+function renderCell(d,type){
 
-  const key = `${d.code}_${type}`;
+  const key = `${d.Code}_${type}`;
 
-  if (uploads[key]) {
-    const f = uploads[key];
-
-    return `
-      <a href="/download/${f.fileId}" target="_blank">${f.fileName}</a><br>
-      <small>${f.uploadedBy}</small><br>
-      <small>${f.uploadedAt}</small>
-    `;
+  if(uploads[key]){
+    return uploads[key].files.map(f =>
+      `<a href="${f.fileUrl}" target="_blank">File</a>`
+    ).join("<br>") + "<br>Done";
   }
 
   return `
-    <input type="file" id="${type}_${d.code}">
-    <button onclick="upload('${d.code}','${type}','${d.name}')">Upload</button>
+    <input type="file" id="${type}_${d.Code}" multiple><br>
+    <button onclick="uploadFiles('${d.Code}','${type}','${d["Stockist Name"]}')">Upload</button>
   `;
 }
 
-// ================= UPLOAD =================
-async function upload(code, type, name) {
+async function uploadFiles(code,type,name){
 
-  const file = document.getElementById(`${type}_${code}`).files[0];
+  const value=document.getElementById(`val_${code}`).value;
+  const files=document.getElementById(`${type}_${code}`).files;
 
-  if (!file) return alert("Choose file");
+  if(!value) return alert("Value required");
+  if(files.length===0) return alert("Select files");
 
-  const form = new FormData();
-  form.append("file", file);
-  form.append("code", code);
-  form.append("type", type);
-  form.append("stockistName", name);
+  const form=new FormData();
+  form.append("code",code);
+  form.append("stockistName",name);
+  form.append("value",value);
+  form.append("type",type);
 
-  const res = await fetch('/uploadFile', { method:'POST', body:form });
+  for(let f of files){
+    form.append("files",f);
+  }
+
+  const res = await fetch('/uploadFile',{
+    method:'POST',
+    body:form,
+    credentials:'include'
+  });
+
   const result = await res.json();
 
-  if (result.status === "success") {
+  if(result.status==="success"){
     alert("Uploaded");
     load();
   } else {
@@ -156,30 +232,18 @@ async function upload(code, type, name) {
   }
 }
 
-// ================= SUMMARY =================
-function updateSummary() {
-
-  let total = data.length;
-  let sssR=0, sssP=0, awsR=0, awsP=0;
-
-  data.forEach(d => {
-    uploads[`${d.code}_SSS`] ? sssR++ : sssP++;
-    uploads[`${d.code}_AWS`] ? awsR++ : awsP++;
-  });
-
-  document.getElementById("total").innerText = total;
-  document.getElementById("sssR").innerText = sssR;
-  document.getElementById("sssP").innerText = sssP;
-  document.getElementById("awsR").innerText = awsR;
-  document.getElementById("awsP").innerText = awsP;
+function downloadReport(){
+  window.open('/downloadReport','_blank');
 }
 
-// ================= FILTER EVENTS =================
-document.querySelectorAll("input").forEach(i => {
-  i.addEventListener("input", renderTable);
-});
+function downloadZip(){
+  window.open('/downloadZip','_blank');
+}
 
-// ================= INIT =================
+function logout(){
+  window.location='/login.html';
+}
+
 load();
 
 </script>
