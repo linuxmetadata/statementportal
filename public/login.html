@@ -1,51 +1,106 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Login</title>
+  <title>Statement Portal Login</title>
+  <style>
+    body {
+      font-family: Arial;
+      background: #f5f5f5;
+      display:flex;
+      justify-content:center;
+      align-items:center;
+      height:100vh;
+    }
+
+    .box {
+      background:white;
+      padding:30px;
+      border-radius:10px;
+      width:300px;
+      text-align:center;
+      box-shadow:0 0 10px rgba(0,0,0,0.2);
+    }
+
+    select, input {
+      width:100%;
+      padding:10px;
+      margin:10px 0;
+    }
+
+    button {
+      width:100%;
+      padding:10px;
+      background:#0b3d91;
+      color:white;
+      border:none;
+      cursor:pointer;
+    }
+
+    .google-btn {
+      background:#db4437;
+    }
+  </style>
 </head>
 
-<body style="text-align:center; margin-top:100px;">
+<body>
 
-<h2>Statement Portal Login</h2>
+<div class="box">
+  <h2>Statement Portal Login</h2>
 
-<!-- ADMIN LOGIN -->
-<div>
-  <h3>Admin Login</h3>
-  <input id="username" placeholder="Username"><br><br>
-  <input id="password" type="password" placeholder="Password"><br><br>
-  <button onclick="adminLogin()">Login</button>
-</div>
+  <select id="mode" onchange="toggleMode()">
+    <option value="admin">Admin Login</option>
+    <option value="user">User Login</option>
+  </select>
 
-<br><br>
+  <!-- ADMIN -->
+  <div id="adminBox">
+    <input id="username" placeholder="Username">
+    <input id="password" type="password" placeholder="Password">
+    <button onclick="adminLogin()">Login</button>
+  </div>
 
-<!-- USER LOGIN -->
-<div>
-  <h3>User Login</h3>
-  <button onclick="googleLogin()">Login with Email</button>
+  <!-- USER -->
+  <div id="userBox" style="display:none;">
+    <button class="google-btn" onclick="googleLogin()">
+      Login with Google
+    </button>
+  </div>
 </div>
 
 <script>
+function toggleMode() {
+  const mode = document.getElementById('mode').value;
+
+  document.getElementById('adminBox').style.display =
+    mode === 'admin' ? 'block' : 'none';
+
+  document.getElementById('userBox').style.display =
+    mode === 'user' ? 'block' : 'none';
+}
+
+// ADMIN LOGIN
 async function adminLogin() {
+  const username = document.getElementById('username').value;
+  const password = document.getElementById('password').value;
+
   const res = await fetch('/login', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({
-      username: document.getElementById('username').value,
-      password: document.getElementById('password').value
-    })
+    body: JSON.stringify({ username, password })
   });
 
-  const result = await res.json();
+  const data = await res.json();
 
-  if (result.status === 'success') {
-    location.href = '/dashboard.html';
+  if (data.status === 'success') {
+    window.location = '/dashboard.html';
   } else {
-    alert(result.msg);
+    alert('Invalid Login');
   }
 }
 
+// GOOGLE LOGIN
 function googleLogin() {
-  window.location.href = '/auth';
+  window.location = '/auth';
 }
 </script>
 
