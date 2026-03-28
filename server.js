@@ -1,43 +1,70 @@
+require('dotenv').config();
+
 const express = require('express');
 const session = require('express-session');
 const multer = require('multer');
-const fs = require('fs');
-const path = require('path');
-const XLSX = require('xlsx');
 const { google } = require('googleapis');
+const fs = require('fs');
 
 const app = express();
+const upload = multer({ dest: 'uploads/' });
+
 const PORT = process.env.PORT || 3000;
 
-// ================= BASIC =================
-app.use(express.static('public'));
-app.use(express.json());
+const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI;
 
+const FOLDER_ID = '168KzEusKlXsHQ-votUNTNA9g0VIai4X-';
+
+// ================= SESSION =================
 app.use(session({
-  secret: 'statementportal_secret',
+  secret: 'portal-secret',
   resave: false,
   saveUninitialized: true
 }));
 
-// ================= FILE UPLOAD =================
-const upload = multer({ dest: 'uploads/' });
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static('public'));
 
-// ================= OAUTH =================
+// ================= GOOGLE AUTH =================
 const oauth2Client = new google.auth.OAuth2(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-  process.env.GOOGLE_REDIRECT_URI
+  CLIENT_ID,
+  CLIENT_SECRET,
+  REDIRECT_URI
 );
 
-const SCOPES = ['https://www.googleapis.com/auth/drive'];
+// ================= STORAGE (IMPORTANT) =================
+let uploadsData = {}; 
+// format:
+// uploadsData["AP183_SSS"] = {
+//   fileName,
+//   fileId,
+//   uploadedBy,
+//   uploadedAt
+// }
 
-// ================= LOGIN =================
+// ================= ADMIN LOGIN =================
+app.post('/login', (req, res) => {
+  const { username, password } = req.body;
+
+  if (username === 'admin' && password === 'admin') {
+    req.session.user = username;
+    return res.json({ status: 'success' });
+  }
+
+  res.json({ status: 'error', msg: 'Invalid login' });
+});
+
+// ================= GOOGLE LOGIN =================
 app.get('/auth', (req, res) => {
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline',
-    scope: SCOPES,
-    prompt: 'consent'
+    prompt: 'consent',
+    scope: ['https://www.googleapis.com/auth/drive']
   });
+
   res.redirect(url);
 });
 
@@ -54,194 +81,112 @@ app.get('/oauth2callback', async (req, res) => {
     res.redirect('/dashboard.html');
 
   } catch (err) {
-    console.log("❌ OAuth Error:", err);
+    console.log("❌ OAuth Error:", err.message);
     res.send("Login failed: " + err.message);
   }
 });
 
-// ================= DRIVE =================
-function getDrive(req) {
-  oauth2Client.setCredentials(req.session.tokens);
-  return google.drive({ version: 'v3', auth: oauth2Client });
-}
-
-// ================= DATA STORAGE =================
-let DATA = [];
-
-// ================= LOAD SOURCE EXCEL =================
-async function loadExcelFromDrive(req) {
-  try {
-
-    const drive = getDrive(req);
-
-    const list = await drive.files.list({
-      pageSize: 1,
-      fields: 'files(id, name)'
-    });
-
-    if (!list.data.files.length) {
-      console.log("❌ No Excel found in Drive");
-      return;
-    }
-
-    const file = list.data.files[0];
-
-    const tempPath = path.join(__dirname, 'temp.xlsx');
-    const dest = fs.createWriteStream(tempPath);
-
-    const response = await drive.files.get(
-      { fileId: file.id, alt: 'media' },
-      { responseType: 'stream' }
-    );
-
-    await new Promise((resolve, reject) => {
-      response.data
-        .pipe(dest)
-        .on('finish', resolve)
-        .on('error', reject);
-    });
-
-    const workbook = XLSX.readFile(tempPath);
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const raw = XLSX.utils.sheet_to_json(sheet, { defval: "" });
-
-    DATA = raw.map(r => ({
-      STATE: r["STATE"] || "",
-      BM_HQ: r["BM_HQ"] || "",
-      Code: r["Code"] || "",
-      Name: r["Stockist Name"] || "",
-      Value: "",
-      SSS_File: "",
-      AWS_File: "",
-      SSS_Status: "Pending",
-      AWS_Status: "Pending",
-      Submitted_By: "",
-      Submitted_On: ""
-    }));
-
-    fs.unlinkSync(tempPath);
-
-    console.log("✅ Excel Loaded:", DATA.length);
-
-  } catch (err) {
-    console.log("❌ Excel Load Error:", err.message);
+// ================= AUTH =================
+function checkAuth(req, res, next) {
+  if (!req.session.tokens) {
+    return res.status(401).json({ status: 'error', msg: 'Not authenticated' });
   }
+
+  oauth2Client.setCredentials(req.session.tokens);
+  next();
 }
 
 // ================= GET DATA =================
-app.get('/getData', async (req, res) => {
-  try {
-    if (!req.session.tokens) {
-      return res.json({ data: [] });
-    }
-
-    await loadExcelFromDrive(req);
-
-    res.json({ data: DATA });
-
-  } catch (err) {
-    res.json({ data: [] });
-  }
+app.get('/getData', (req, res) => {
+  res.json({ status: 'success', uploads: uploadsData });
 });
 
-// ================= UPLOAD FILE =================
-app.post('/uploadFile', upload.single('file'), async (req, res) => {
+// ================= UPLOAD =================
+app.post('/uploadFile', checkAuth, upload.single('file'), async (req, res) => {
   try {
-
-    if (!req.session.tokens) {
-      return res.json({ status: "error", msg: "Login required" });
-    }
-
-    const drive = getDrive(req);
-
     const file = req.file;
-    const code = req.body.code;
-    const type = req.body.type; // SSS or AWS
+    const { code, type, stockistName } = req.body;
 
     if (!file) {
-      return res.json({ status: "error", msg: "No file selected" });
+      return res.json({ status: 'error', msg: 'No file uploaded' });
     }
 
-    // Upload to Google Drive
-    const uploadRes = await drive.files.create({
-      requestBody: {
-        name: `${type}_${code}_${file.originalname}`
+    const key = `${code}_${type}`;
+
+    // prevent re-upload
+    if (uploadsData[key]) {
+      return res.json({ status: 'error', msg: 'Already uploaded' });
+    }
+
+    const cleanName = stockistName
+      .replace(/[^a-zA-Z0-9 ]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const finalName = `${cleanName}_${code}_${type}${file.originalname.substring(file.originalname.lastIndexOf('.'))}`;
+
+    const drive = google.drive({ version: 'v3', auth: oauth2Client });
+
+    const response = await drive.files.create({
+      resource: {
+        name: finalName,
+        parents: [FOLDER_ID]
       },
       media: {
+        mimeType: file.mimetype,
         body: fs.createReadStream(file.path)
-      }
+      },
+      fields: 'id'
     });
-
-    const fileId = uploadRes.data.id;
-
-    // Make public
-    await drive.permissions.create({
-      fileId,
-      requestBody: {
-        role: 'reader',
-        type: 'anyone'
-      }
-    });
-
-    const fileLink = `https://drive.google.com/file/d/${fileId}/view`;
-
-    // Update DATA
-    const row = DATA.find(r => r.Code === code);
-
-    if (row) {
-      if (type === "SSS") {
-        row.SSS_File = fileLink;
-        row.SSS_Status = "Uploaded";
-      } else {
-        row.AWS_File = fileLink;
-        row.AWS_Status = "Uploaded";
-      }
-
-      row.Submitted_By = "Admin";
-      row.Submitted_On = new Date().toLocaleString();
-    }
 
     fs.unlinkSync(file.path);
 
-    console.log("✅ Upload Success:", file.originalname);
+    // SAVE DATA
+    uploadsData[key] = {
+      fileName: finalName,
+      fileId: response.data.id,
+      uploadedBy: req.session.user || "Admin",
+      uploadedAt: new Date().toLocaleString()
+    };
 
-    res.json({ status: "success" });
+    res.json({ status: 'success' });
 
   } catch (err) {
     console.log("❌ Upload Error:", err.message);
-
-    res.json({
-      status: "error",
-      msg: err.message || "Upload failed"
-    });
+    res.json({ status: 'error', msg: err.message });
   }
 });
 
-// ================= DOWNLOAD REPORT =================
-app.get('/downloadReport', (req, res) => {
+// ================= DOWNLOAD =================
+app.get('/download/:id', checkAuth, async (req, res) => {
   try {
-    const ws = XLSX.utils.json_to_sheet(DATA);
-    const wb = XLSX.utils.book_new();
+    const drive = google.drive({ version: 'v3', auth: oauth2Client });
 
-    XLSX.utils.book_append_sheet(wb, ws, "Report");
+    const file = await drive.files.get({
+      fileId: req.params.id,
+      alt: 'media'
+    }, { responseType: 'stream' });
 
-    const filePath = "report.xlsx";
-
-    XLSX.writeFile(wb, filePath);
-
-    res.download(filePath);
+    file.data.pipe(res);
 
   } catch (err) {
-    res.send("Error generating report");
+    res.send(err.message);
   }
 });
 
-// ================= ROOT FIX =================
+// ================= LOGOUT =================
+app.get('/logout', (req, res) => {
+  req.session.destroy(() => {
+    res.redirect('/login.html');
+  });
+});
+
+// ================= DEFAULT =================
 app.get('/', (req, res) => {
   res.redirect('/login.html');
 });
 
 // ================= START =================
 app.listen(PORT, () => {
-  console.log("🚀 OAuth Server Running...");
+  console.log("🚀 Server running...");
 });

@@ -2,243 +2,182 @@
 <html>
 <head>
   <title>Statement Portal</title>
-
   <style>
     body { font-family: Arial; background:#f5f5f5; padding:20px; }
-    h2 { text-align:center; }
-
-    table {
-      width:100%;
-      border-collapse:collapse;
-      background:white;
-    }
-
-    th, td {
-      padding:8px;
-      border:1px solid #ccc;
-      text-align:center;
-    }
-
-    th {
-      background:#007bff;
-      color:white;
-    }
-
-    input[type="text"] {
-      width:90px;
-      padding:5px;
-    }
-
-    .btn {
-      padding:5px 10px;
-      margin:2px;
-      border:none;
-      cursor:pointer;
-      color:white;
-      background:#007bff;
-    }
-
-    .delete { background:red; }
-
+    table { width:100%; border-collapse:collapse; background:#fff; }
+    th, td { border:1px solid #ccc; padding:8px; text-align:center; }
+    th { background:#1976d2; color:#fff; }
+    input { padding:5px; width:90%; }
+    .card { background:#fff; padding:15px; border-radius:10px; width:18%; display:inline-block; margin:5px; text-align:center; }
   </style>
 </head>
 
 <body>
 
-<h2>Statement Portal</h2>
+<h2 style="text-align:center;">Statement Portal</h2>
 
-<div style="margin-bottom:10px;">
-  <button onclick="downloadReport()">Download Report</button>
-  <button onclick="downloadPending()">Download Pending</button>
-  <button onclick="downloadFiles()">Download Files</button>
-  <button onclick="refresh()">Refresh</button>
+<!-- SUMMARY -->
+<div id="summary">
+  <div class="card">Total<br><b id="total">0</b></div>
+  <div class="card">SSS Received<br><b id="sssR">0</b></div>
+  <div class="card">SSS Pending<br><b id="sssP">0</b></div>
+  <div class="card">AWS Received<br><b id="awsR">0</b></div>
+  <div class="card">AWS Pending<br><b id="awsP">0</b></div>
 </div>
 
-<table>
-<thead>
-<tr>
-  <th>State</th>
-  <th>BM HQ</th>
-  <th>Code</th>
-  <th>Stockist Name</th>
-  <th>Value</th>
-  <th>SSS</th>
-  <th>AWS</th>
-</tr>
-</thead>
+<br>
 
-<tbody id="body"></tbody>
+<!-- FILTER -->
+<tr>
+  <td><input id="f_state" placeholder="State"></td>
+  <td><input id="f_bm" placeholder="BM HQ"></td>
+  <td><input id="f_code" placeholder="Code"></td>
+  <td><input id="f_name" placeholder="Stockist"></td>
+</tr>
+
+<br>
+
+<table id="table">
+  <thead>
+    <tr>
+      <th>State</th>
+      <th>BM HQ</th>
+      <th>Code</th>
+      <th>Stockist Name</th>
+      <th>SSS</th>
+      <th>AWS</th>
+    </tr>
+  </thead>
+
+  <tbody id="tbody">
+  </tbody>
 </table>
 
 <script>
 
-let role = "";
+// 🔹 SAMPLE DATA (replace with Excel later)
+const data = [
+  {state:"ANDRA PRADESH", bm:"RAJAHMUNDRY", code:"AP183", name:"LAHARI MEDICAL AGENCIES"},
+  {state:"ANDRA PRADESH", bm:"RAJAHMUNDRY", code:"AP243", name:"ROHINI MEDICAL AGENCIES"},
+  {state:"ANDRA PRADESH", bm:"TIRUPATHI", code:"AP292", name:"HARIKA MEDICAL AGENCIES"}
+];
+
+let uploads = {};
 
 // ================= LOAD =================
 async function load() {
 
   const res = await fetch('/getData');
-  const data = await res.json();
+  const result = await res.json();
+  uploads = result.uploads || {};
 
-  role = data.role;
+  renderTable();
+  updateSummary();
+}
 
-  const body = document.getElementById("body");
-  body.innerHTML = "";
+// ================= TABLE =================
+function renderTable() {
 
-  if (!data.data || data.data.length === 0) {
-    body.innerHTML = "<tr><td colspan='7'>No Data</td></tr>";
-    return;
-  }
+  const tbody = document.getElementById("tbody");
+  tbody.innerHTML = "";
 
-  data.data.forEach(r => {
+  const f_state = document.getElementById("f_state").value.toLowerCase();
+  const f_bm = document.getElementById("f_bm").value.toLowerCase();
+  const f_code = document.getElementById("f_code").value.toLowerCase();
+  const f_name = document.getElementById("f_name").value.toLowerCase();
 
-    let tr = document.createElement("tr");
+  data.forEach(d => {
 
-    tr.innerHTML = `
-      <td>${r.STATE}</td>
-      <td>${r.BM_HQ}</td>
-      <td>${r.Code}</td>
-      <td>${r.Name}</td>
+    if (
+      d.state.toLowerCase().includes(f_state) &&
+      d.bm.toLowerCase().includes(f_bm) &&
+      d.code.toLowerCase().includes(f_code) &&
+      d.name.toLowerCase().includes(f_name)
+    ) {
 
-      <td>
-        <input type="text" value="${r.Value || ''}" 
-        onchange="save('${r.Code}', this.value)">
-      </td>
+      const tr = document.createElement("tr");
 
-      <td>${fileCell(r,'SSS')}</td>
-      <td>${fileCell(r,'AWS')}</td>
-    `;
+      tr.innerHTML = `
+        <td>${d.state}</td>
+        <td>${d.bm}</td>
+        <td>${d.code}</td>
+        <td>${d.name}</td>
+        <td>${renderCell(d, "SSS")}</td>
+        <td>${renderCell(d, "AWS")}</td>
+      `;
 
-    body.appendChild(tr);
+      tbody.appendChild(tr);
+    }
   });
 }
 
-// ================= SAVE VALUE =================
-function save(code, value) {
+// ================= CELL =================
+function renderCell(d, type) {
 
-  fetch('/saveValue', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({code, value})
-  });
-}
+  const key = `${d.code}_${type}`;
 
-// ================= FILE CELL =================
-function fileCell(row, type) {
-
-  const inputId = `${type}_${row.Code}`;
-  const btnId = `btn_${inputId}`;
-
-  // 🔹 NO FILE
-  if (!row[`${type}_File`]) {
+  if (uploads[key]) {
+    const f = uploads[key];
 
     return `
-      <input type="file" id="${inputId}" onchange="showUpload('${row.Code}','${type}')">
-      <div id="${btnId}"></div>
+      <a href="/download/${f.fileId}" target="_blank">${f.fileName}</a><br>
+      <small>${f.uploadedBy}</small><br>
+      <small>${f.uploadedAt}</small>
     `;
   }
 
-  // 🔹 FILE EXISTS
-  let viewBtn = `<button class="btn" onclick="view('${row.Code}','${type}')">View</button>`;
-
-  let deleteBtn = "";
-
-  if (role === "admin") {
-    deleteBtn = `<button class="btn delete" onclick="del('${row.Code}','${type}')">Delete</button>`;
-  }
-
-  return viewBtn + deleteBtn;
+  return `
+    <input type="file" id="${type}_${d.code}">
+    <button onclick="upload('${d.code}','${type}','${d.name}')">Upload</button>
+  `;
 }
 
-// ================= SHOW UPLOAD =================
-function showUpload(code, type) {
+// ================= UPLOAD =================
+async function upload(code, type, name) {
 
-  const input = document.getElementById(`${type}_${code}`);
+  const file = document.getElementById(`${type}_${code}`).files[0];
 
-  if (input.files.length > 0) {
-
-    document.getElementById(`btn_${type}_${code}`).innerHTML = `
-      <button class="btn" onclick="upload('${code}','${type}')">Upload</button>
-    `;
-  }
-}
-
-async function upload(code, type) {
-
-  const input = document.getElementById(`${type}_${code}`);
-  const file = input.files[0];
-
-  if (!file) {
-    return alert("Please choose file");
-  }
+  if (!file) return alert("Choose file");
 
   const form = new FormData();
   form.append("file", file);
   form.append("code", code);
   form.append("type", type);
+  form.append("stockistName", name);
 
-  try {
+  const res = await fetch('/uploadFile', { method:'POST', body:form });
+  const result = await res.json();
 
-    const res = await fetch('/uploadFile', {
-      method: 'POST',
-      body: form
-    });
-
-    const result = await res.json();
-
-    console.log("UPLOAD RESPONSE:", result); // 👈 IMPORTANT
-
-    if (result.status === "success") {
-      alert("✅ File Uploaded Successfully");
-    } else {
-      alert("❌ " + (result.msg || "Upload failed"));
-    }
-
-  } catch (err) {
-    console.error("UPLOAD ERROR:", err);
-    alert("❌ Network / Server error");
+  if (result.status === "success") {
+    alert("Uploaded");
+    load();
+  } else {
+    alert(result.msg);
   }
-
-  load();
 }
 
-// ================= VIEW =================
-function view(code, type) {
-  window.open(`/viewFile?code=${code}&type=${type}`);
-}
+// ================= SUMMARY =================
+function updateSummary() {
 
-// ================= DELETE =================
-async function del(code, type) {
+  let total = data.length;
+  let sssR=0, sssP=0, awsR=0, awsP=0;
 
-  if (!confirm("Delete this file?")) return;
-
-  await fetch('/deleteFile', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({code, type})
+  data.forEach(d => {
+    uploads[`${d.code}_SSS`] ? sssR++ : sssP++;
+    uploads[`${d.code}_AWS`] ? awsR++ : awsP++;
   });
 
-  load();
+  document.getElementById("total").innerText = total;
+  document.getElementById("sssR").innerText = sssR;
+  document.getElementById("sssP").innerText = sssP;
+  document.getElementById("awsR").innerText = awsR;
+  document.getElementById("awsP").innerText = awsP;
 }
 
-// ================= DOWNLOAD =================
-function downloadReport() {
-  window.open('/downloadReport');
-}
-
-function downloadPending() {
-  window.open('/downloadPending');
-}
-
-function downloadFiles() {
-  window.open('/downloadAllFiles');
-}
-
-// ================= REFRESH =================
-async function refresh() {
-  await fetch('/refreshData');
-  load();
-}
+// ================= FILTER EVENTS =================
+document.querySelectorAll("input").forEach(i => {
+  i.addEventListener("input", renderTable);
+});
 
 // ================= INIT =================
 load();
