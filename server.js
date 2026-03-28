@@ -63,6 +63,10 @@ app.use(session({
 
 app.use(express.static('public'));
 
+app.get('/', (req, res) => {
+  res.sendFile(__dirname + '/public/login.html');
+});
+
 // ================= LOGIN =================
 app.post('/adminLogin', (req, res) => {
   if (req.body.username === 'admin' && req.body.password === 'admin123') {
