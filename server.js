@@ -1,68 +1,93 @@
-require('dotenv').config();
-
-const express = require('express');
-const { google } = require('googleapis');
-const multer = require('multer');
-const path = require('path');
-const { PassThrough } = require('stream');
+require("dotenv").config();
+const express = require("express");
+const session = require("express-session");
+const multer = require("multer");
+const { google } = require("googleapis");
+const fs = require("fs");
+const path = require("path");
 
 const app = express();
-const PORT = process.env.PORT || 10000;
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// ================= MULTER =================
-const upload = multer({ storage: multer.memoryStorage() });
+// SESSION
+app.use(
+  session({
+    secret: "secret123",
+    resave: false,
+    saveUninitialized: true,
+  })
+);
 
 // ================= GOOGLE AUTH =================
+
 const auth = new google.auth.GoogleAuth({
   credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
-  scopes: ['https://www.googleapis.com/auth/drive']
+  scopes: ["https://www.googleapis.com/auth/drive"],
 });
 
-const drive = google.drive({ version: 'v3', auth });
+const drive = google.drive({ version: "v3", auth });
 
-// ================= MIDDLEWARE =================
-app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.json());
+// ================= MULTER =================
 
-// ================= ROUTES =================
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+const upload = multer({ dest: "uploads/" });
+
+// ================= TEST ROUTE =================
+
+app.get("/", (req, res) => {
+  res.send(`
+    <h2>Simple Upload Test</h2>
+    <form action="/upload" method="post" enctype="multipart/form-data">
+      <input type="file" name="file" required />
+      <button type="submit">Upload</button>
+    </form>
+  `);
 });
 
-// ================= SIMPLE UPLOAD =================
-app.post('/upload', upload.single('file'), async (req, res) => {
+// ================= UPLOAD ROUTE =================
+
+app.post("/upload", upload.single("file"), async (req, res) => {
   try {
-    console.log("FILE:", req.file);
-
     if (!req.file) {
-      return res.json({ message: "No file ❌" });
+      return res.send("No file selected");
     }
 
-    const stream = new PassThrough();
-    stream.end(req.file.buffer);
+    console.log("📂 File received:", req.file.originalname);
 
+    const folderId = process.env.GOOGLE_FOLDER_ID;
+
+    // FILE METADATA
+    const fileMetadata = {
+      name: req.file.originalname,
+      parents: [folderId],
+    };
+
+    // MEDIA
+    const media = {
+      mimeType: req.file.mimetype,
+      body: fs.createReadStream(req.file.path),
+    };
+
+    // UPLOAD TO DRIVE
     const response = await drive.files.create({
-      requestBody: {
-        name: req.file.originalname,
-        parents: [process.env.FOLDER_ID]
-      },
-      media: {
-        mimeType: req.file.mimetype,
-        body: stream
-      }
+      resource: fileMetadata,
+      media: media,
+      fields: "id",
     });
 
-    console.log("UPLOAD SUCCESS:", response.data.id);
+    console.log("✅ Uploaded File ID:", response.data.id);
 
-    res.json({ message: "Upload Success ✅" });
+    // DELETE LOCAL FILE
+    fs.unlinkSync(req.file.path);
 
+    res.send("✅ Upload Success");
   } catch (err) {
-    console.error("UPLOAD ERROR:", err);
-    res.json({ message: "Upload Failed ❌" });
+    console.error("❌ Upload Error:", err.message);
+    res.send("❌ Upload Failed");
   }
 });
 
 // ================= START =================
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log("🚀 Running on", PORT));
