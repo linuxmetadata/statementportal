@@ -2,21 +2,38 @@
 <html>
 <head>
     <title>Dashboard</title>
+
     <style>
-        body { font-family: Arial; padding:20px; background:#f5f5f5; }
-        table { width:100%; border-collapse: collapse; background:#fff; }
-        th { background:#1f6fb2; color:#fff; padding:10px; }
-        td { padding:8px; border-bottom:1px solid #ddd; }
-        input { width:95%; padding:5px; }
+        body { font-family: Arial; padding:20px; }
+
+        table {
+            width:100%;
+            border-collapse: collapse;
+            margin-top:20px;
+        }
+
+        th, td {
+            border:1px solid #ccc;
+            padding:8px;
+            text-align:left;
+        }
+
+        th {
+            background:#1f6fb2;
+            color:white;
+        }
+
+        button {
+            padding:5px 8px;
+            margin:2px;
+            cursor:pointer;
+        }
     </style>
 </head>
+
 <body>
-<td>
-    ${role === 'admin' ? '<input type="file" multiple>' : '—'}
-</td>
 
 <h2>Dashboard</h2>
-
 <button onclick="logout()">Logout</button>
 
 <table>
@@ -25,10 +42,10 @@
     <th>State</th>
     <th>BM HQ</th>
     <th>Code</th>
-    <th>Stockist Name</th>
+    <th>Name</th>
     <th>Value</th>
-    <th>SSS Upload</th>
-    <th>AWS Upload</th>
+    <th>SSS</th>
+    <th>AWS</th>
 </tr>
 </thead>
 
@@ -37,49 +54,143 @@
 
 <script>
 
-if (!localStorage.getItem("user")) {
+const role = localStorage.getItem("role");
+if (!role) window.location.href = "/";
+
+function logout() {
+    localStorage.clear();
     window.location.href = "/";
 }
 
+// 🧠 TEMP STORAGE (simulate uploaded status)
+let uploadedData = {}; 
+
 async function loadData() {
+
     const res = await fetch('/getData');
     const data = await res.json();
+    const rows = data.rows || [];
 
-    const tbody = document.getElementById('tableBody');
-    tbody.innerHTML = '';
+    const table = document.getElementById("tableBody");
+    table.innerHTML = "";
 
-    data.rows.forEach(row => {
+    rows.forEach(row => {
 
-        const tr = document.createElement('tr');
+        const code = row["Code"];
+        const state = row["STATE"];
+        const name = row["Stockist Name"];
 
-        tr.innerHTML = `
-            <td>${row["STATE"] || ''}</td>
-            <td>${row["BM_HQ"] || ''}</td>
-            <td>${row["Code"] || ''}</td>
-            <td>${row["Stockist Name"] || ''}</td>
+        table.innerHTML += `
+        <tr>
+            <td>${state}</td>
+            <td>${row["BM_HQ"]}</td>
+            <td>${code}</td>
+            <td>${name}</td>
+            <td>${row["Sales_Value"] || ''}</td>
 
-            <td>
-                <input type="text" placeholder="Enter Value">
+            <!-- SSS -->
+            <td id="sss_${code}">
+                ${renderCell(code, 'SSS', state, name)}
             </td>
 
-            <td>
-                <input type="file" multiple>
+            <!-- AWS -->
+            <td id="aws_${code}">
+                ${renderCell(code, 'AWS', state, name)}
             </td>
-
-            <td>
-                <input type="file" multiple>
-            </td>
+        </tr>
         `;
-
-        tbody.appendChild(tr);
     });
 }
 
-function logout() {
-    localStorage.removeItem("user");
-    window.location.href = "/";
+// 🎯 RENDER CELL
+function renderCell(code, type, state, name) {
+
+    const key = code + "_" + type;
+    const data = uploadedData[key];
+
+    // AFTER UPLOAD
+    if (data) {
+        return `
+            <button onclick="viewFile('${data.link}')">View</button>
+            ${role === 'admin' ? `<button onclick="deleteFile('${key}')">Delete</button>` : ''}
+        `;
+    }
+
+    // BEFORE UPLOAD
+    if (role !== 'admin') return '-';
+
+    return `
+        <input type="file" multiple onchange="selectFiles(event, '${code}', '${type}', '${state}', '${name}')">
+        <div id="action_${key}"></div>
+    `;
 }
 
+// 📂 FILE SELECT
+function selectFiles(event, code, type, state, name) {
+
+    const files = event.target.files;
+    if (!files.length) return;
+
+    const key = code + "_" + type;
+
+    document.getElementById("action_" + key).innerHTML = `
+        <button onclick="uploadFile('${key}', '${code}', '${type}', '${state}', '${name}')">Upload</button>
+    `;
+
+    uploadedData[key] = { files }; // temp store
+}
+
+// 📤 UPLOAD
+async function uploadFile(key, code, type, state, name) {
+
+    const fileData = uploadedData[key];
+    if (!fileData) return;
+
+    const formData = new FormData();
+    formData.append('code', code);
+    formData.append('type', type);
+    formData.append('state', state);
+    formData.append('name', name);
+
+    for (let file of fileData.files) {
+        formData.append('files', file);
+    }
+
+    const res = await fetch('/upload', {
+        method: 'POST',
+        body: formData
+    });
+
+    const result = await res.json();
+
+    alert(result.message);
+
+    // simulate stored link
+    uploadedData[key] = {
+        link: "#"
+    };
+
+    reloadCell(code, type, state, name);
+}
+
+// 🔄 REFRESH CELL
+function reloadCell(code, type, state, name) {
+    const id = (type === 'SSS' ? 'sss_' : 'aws_') + code;
+    document.getElementById(id).innerHTML = renderCell(code, type, state, name);
+}
+
+// 👁 VIEW
+function viewFile(link) {
+    window.open(link, '_blank');
+}
+
+// ❌ DELETE (ADMIN)
+function deleteFile(key) {
+    delete uploadedData[key];
+    location.reload();
+}
+
+// 🚀 INIT
 loadData();
 
 </script>
