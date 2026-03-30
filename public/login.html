@@ -1,91 +1,62 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Statement Portal Login</title>
-
-    <style>
-        body {
-            font-family: Arial;
-            background: #f5f5f5;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-        }
-
-        .box {
-            background: white;
-            padding: 30px;
-            border-radius: 8px;
-            width: 320px;
-            text-align: center;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-        }
-
-        input {
-            width: 90%;
-            padding: 10px;
-            margin: 10px 0;
-        }
-
-        button {
-            width: 95%;
-            padding: 10px;
-            background: #1f6fb2;
-            color: white;
-            border: none;
-            cursor: pointer;
-        }
-
-        .error {
-            color: red;
-            font-size: 13px;
-        }
-    </style>
+<title>Login</title>
+<style>
+body {font-family:Arial;display:flex;justify-content:center;align-items:center;height:100vh;background:#f5f5f5}
+.box{background:#fff;padding:30px;border-radius:8px;width:320px;text-align:center}
+input{width:90%;padding:10px;margin:10px 0}
+button{width:95%;padding:10px;background:#1f6fb2;color:#fff;border:none}
+</style>
 </head>
 
 <body>
 
 <div class="box">
-    <h2>Statement Portal</h2>
+<h2>Statement Portal</h2>
 
-    <input type="text" id="empId" placeholder="Enter Emp ID">
-    <button onclick="login()">Login</button>
+<h4>User Login</h4>
+<input type="text" id="empId" placeholder="Enter ID">
+<button onclick="userLogin()">Login</button>
 
-    <div id="err" class="error"></div>
+<hr>
+
+<h4>Admin Login</h4>
+<button onclick="adminLogin()">Login with Gmail</button>
+
+<div id="err" style="color:red"></div>
 </div>
 
 <script>
 
-// auto redirect if already logged in
-if (localStorage.getItem("empId")) {
-    window.location.href = "/dashboard";
-}
+async function userLogin(){
 
-async function login() {
+    const empId=document.getElementById("empId").value.trim();
 
-    const empId = document.getElementById("empId").value.trim();
-
-    if (!empId) {
-        document.getElementById("err").innerText = "Enter Emp ID ❗";
+    if(!empId){
+        document.getElementById("err").innerText="Enter ID ❗";
         return;
     }
 
-    const res = await fetch("/login", {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({ empId })
+    const res=await fetch("/user-login",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({empId})
     });
 
-    const data = await res.json();
+    const data=await res.json();
 
-    if (data.success) {
-        localStorage.setItem("empId", empId);
-        localStorage.setItem("role", data.role);
-        window.location.href = "/dashboard";
-    } else {
-        document.getElementById("err").innerText = "Invalid Emp ID ❌";
+    if(data.success){
+        localStorage.setItem("role","user");
+        localStorage.setItem("empId",empId);
+        window.location="/dashboard";
+    }else{
+        document.getElementById("err").innerText="Invalid ID ❌";
     }
+}
+
+function adminLogin(){
+    window.location="/auth/google";
 }
 
 </script>

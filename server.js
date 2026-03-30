@@ -12,7 +12,7 @@ const app = express();
 
 // ================= SESSION =================
 app.use(session({
-  secret: "portal_secret_key",
+  secret: "portal_secret",
   resave: false,
   saveUninitialized: true,
 }));
@@ -20,7 +20,7 @@ app.use(session({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ================= GOOGLE AUTH =================
+// ================= GOOGLE DRIVE =================
 const oauth2Client = new google.auth.OAuth2(
   process.env.CLIENT_ID,
   process.env.CLIENT_SECRET,
@@ -39,7 +39,7 @@ const upload = multer({ dest: "uploads/" });
 // ================= CONFIG =================
 const DATA_FILE = "portal_data.json";
 
-// ================= AUTH MIDDLEWARE =================
+// ================= AUTH =================
 function isAuth(req, res, next) {
   if (req.session.user) return next();
   return res.redirect("/");
@@ -54,8 +54,7 @@ function isAdmin(req, res, next) {
 async function getExcelData() {
   const res = await drive.files.export({
     fileId: process.env.EXCEL_FILE_ID,
-    mimeType:
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   }, { responseType: "arraybuffer" });
 
   const wb = xlsx.read(res.data, { type: "buffer" });
@@ -63,7 +62,7 @@ async function getExcelData() {
   return xlsx.utils.sheet_to_json(sheet);
 }
 
-// ================= DATA =================
+// ================= DATA FILE =================
 async function loadData() {
   try {
     const list = await drive.files.list({
@@ -108,63 +107,91 @@ async function saveData(data) {
   }
 }
 
-// ================= LOGIN =================
-app.post("/login", async (req, res) => {
-  const { empId } = req.body;
-  const excel = await getExcelData();
+// ================= USER LOGIN =================
+app.post("/user-login", async (req, res) => {
 
-  const user = excel.find(
-    (r) => String(r["Emp ID"]).trim() === empId.trim()
+  const { empId } = req.body;
+  const data = await getExcelData();
+
+  const matched = data.filter(r =>
+    r.BH_ID === empId ||
+    r.SM_ID === empId ||
+    r.ZBM_ID === empId ||
+    r.RBM_ID === empId ||
+    r.ABM_ID === empId
   );
 
-  if (!user) return res.json({ success: false });
+  if (matched.length === 0) {
+    return res.json({ success: false });
+  }
 
-  const role = empId === "admin" ? "admin" : "user";
+  req.session.user = {
+    empId,
+    role: "user"
+  };
 
-  req.session.user = { empId, role };
+  res.json({ success: true });
+});
 
-  res.json({ success: true, role });
+// ================= ADMIN LOGIN =================
+// 👉 simple Gmail allow (NO OAuth complexity)
+app.post("/admin-login", (req, res) => {
+
+  const { email } = req.body;
+
+  if (email !== process.env.ADMIN_EMAIL) {
+    return res.json({ success: false, message: "Not allowed ❌" });
+  }
+
+  req.session.user = {
+    role: "admin",
+    email
+  };
+
+  res.json({ success: true });
 });
 
 // ================= LOGOUT =================
 app.get("/logout", (req, res) => {
-  req.session.destroy(() => {
-    res.redirect("/");
-  });
+  req.session.destroy(() => res.redirect("/"));
 });
 
 // ================= GET DATA =================
 app.get("/getData", isAuth, async (req, res) => {
+
   const excel = await getExcelData();
   const uploads = await loadData();
 
-  res.json({ rows: excel, uploads });
+  if (req.session.user.role === "admin") {
+    return res.json({ rows: excel, uploads });
+  }
+
+  const empId = req.session.user.empId;
+
+  const filtered = excel.filter(r =>
+    r.BH_ID === empId ||
+    r.SM_ID === empId ||
+    r.ZBM_ID === empId ||
+    r.RBM_ID === empId ||
+    r.ABM_ID === empId
+  );
+
+  res.json({ rows: filtered, uploads });
 });
 
-// ================= VALIDATION =================
+// ================= FILE VALIDATION =================
 async function validateFile(file) {
-  const allowed = [
-    "application/pdf",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/vnd.ms-excel",
-    "text/plain",
-    "text/html",
-  ];
-
-  if (!allowed.includes(file.mimetype)) return false;
-
   if (file.mimetype === "application/pdf") {
     const buffer = fs.readFileSync(file.path);
     const data = await pdfParse(buffer);
-    return data.text && data.text.length > 10;
+    return data.text.length > 10;
   }
-
   return true;
 }
 
 // ================= UPLOAD =================
 app.post("/upload", isAuth, upload.array("files"), async (req, res) => {
+
   try {
     const { code, state, name, type, value } = req.body;
 
@@ -186,6 +213,7 @@ app.post("/upload", isAuth, upload.array("files"), async (req, res) => {
     const links = [];
 
     for (let f of req.files) {
+
       if (!(await validateFile(f))) {
         fs.unlinkSync(f.path);
         return res.json({ message: "Invalid file ❌" });
@@ -209,7 +237,7 @@ app.post("/upload", isAuth, upload.array("files"), async (req, res) => {
     data[key] = {
       value,
       links,
-      submittedBy: req.session.user.empId,
+      submittedBy: req.session.user.empId || "admin",
       date: new Date().toLocaleString(),
     };
 
@@ -223,11 +251,13 @@ app.post("/upload", isAuth, upload.array("files"), async (req, res) => {
   }
 });
 
-// ================= DELETE (ADMIN ONLY) =================
+// ================= DELETE =================
 app.post("/delete", isAuth, isAdmin, async (req, res) => {
+
   const data = await loadData();
   delete data[req.body.key];
   await saveData(data);
+
   res.json({ message: "Deleted ✅" });
 });
 
@@ -244,6 +274,6 @@ app.get("/dashboard", isAuth, (req, res) => {
 });
 
 // ================= START =================
-app.listen(process.env.PORT || 10000, () =>
-  console.log("🔐 Secure Server Running")
-);
+app.listen(process.env.PORT || 10000, () => {
+  console.log("🚀 Server Running FINAL");
+});
