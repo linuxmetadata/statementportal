@@ -8,6 +8,7 @@ const fs = require('fs');
 const xlsx = require('xlsx');
 const pdfParse = require('pdf-parse');
 const archiver = require('archiver');
+const { Readable } = require('stream');
 
 const app = express();
 const upload = multer({ dest: 'uploads/' });
@@ -20,11 +21,6 @@ const EXCEL_FILE_ID = process.env.EXCEL_FILE_ID;
 const JSON_FILE_NAME = "updates.json";
 
 // ================= GOOGLE DRIVE =================
-if (!process.env.GOOGLE_CREDENTIALS) {
-  console.error("❌ GOOGLE_CREDENTIALS missing");
-  process.exit(1);
-}
-
 const auth = new google.auth.GoogleAuth({
   credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
   scopes: ['https://www.googleapis.com/auth/drive']
@@ -39,8 +35,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(session({
   secret: process.env.SESSION_SECRET || 'secret',
   resave: false,
-  saveUninitialized: false,
-  cookie: { secure: false }
+  saveUninitialized: false
 }));
 
 app.use(express.static('public'));
@@ -60,17 +55,16 @@ app.post('/adminLogin', (req, res) => {
 });
 
 app.post('/userLogin', (req, res) => {
-  if (!req.body.email) return res.json({ status: 'error' });
-
   req.session.user = req.body.email.toLowerCase();
   req.session.role = 'user';
-
   res.json({ status: 'success' });
 });
 
 // ================= EXCEL =================
 async function downloadExcel() {
   try {
+    console.log("📥 Downloading Excel...");
+
     const dest = fs.createWriteStream('temp.xlsx');
 
     const res = await drive.files.get(
@@ -86,16 +80,19 @@ async function downloadExcel() {
     const sheet = wb.Sheets[wb.SheetNames[0]];
     const data = xlsx.utils.sheet_to_json(sheet);
 
+    console.log("✅ Excel rows:", data.length);
+
     fs.unlinkSync('temp.xlsx');
+
     return data;
 
   } catch (err) {
-    console.error("❌ Excel Error:", err.message);
+    console.error("❌ Excel Error:", err);
     return [];
   }
 }
 
-// ================= JSON FILE =================
+// ================= JSON =================
 async function getUpdatesFile() {
 
   const res = await drive.files.list({
@@ -112,7 +109,7 @@ async function getUpdatesFile() {
       },
       media: {
         mimeType: 'application/json',
-        body: Buffer.from(JSON.stringify({}))
+        body: Readable.from([JSON.stringify({})])
       },
       fields: 'id'
     });
@@ -124,7 +121,6 @@ async function getUpdatesFile() {
 }
 
 async function readUpdates() {
-
   const fileId = await getUpdatesFile();
 
   const res = await drive.files.get(
@@ -142,14 +138,13 @@ async function readUpdates() {
 }
 
 async function writeUpdates(content) {
-
   const fileId = await getUpdatesFile();
 
   await drive.files.update({
     fileId,
     media: {
       mimeType: 'application/json',
-      body: Buffer.from(JSON.stringify(content))
+      body: Readable.from([JSON.stringify(content)])
     }
   });
 }
@@ -176,36 +171,27 @@ function mergeData(master, updates) {
 }
 
 // ================= FOLDER =================
-const folderCache = {};
-
 async function getOrCreateFolder(name, parentId) {
-
-  const key = parentId + "_" + name;
-  if (folderCache[key]) return folderCache[key];
 
   const res = await drive.files.list({
     q: `name='${name}' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`,
     fields: 'files(id)'
   });
 
-  let id;
-
   if (res.data.files.length > 0) {
-    id = res.data.files[0].id;
-  } else {
-    const folder = await drive.files.create({
-      resource: {
-        name,
-        mimeType: 'application/vnd.google-apps.folder',
-        parents: [parentId]
-      },
-      fields: 'id'
-    });
-    id = folder.data.id;
+    return res.data.files[0].id;
   }
 
-  folderCache[key] = id;
-  return id;
+  const folder = await drive.files.create({
+    resource: {
+      name,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [parentId]
+    },
+    fields: 'id'
+  });
+
+  return folder.data.id;
 }
 
 // ================= GET DATA =================
@@ -216,12 +202,14 @@ app.get('/getData', async (req, res) => {
   const updates = await readUpdates();
   const master = await downloadExcel();
 
-  let rows = mergeData(master, updates);
+  console.log("MASTER:", master.length);
+
+  const rows = mergeData(master, updates);
 
   res.json({ rows, uploads: updates, role: req.session.role });
 });
 
-// ================= FILE VALIDATION =================
+// ================= VALIDATION =================
 function isValidFile(file) {
   const allowed = ['pdf','doc','docx','xls','xlsx','txt','html'];
   return allowed.includes(file.originalname.split('.').pop().toLowerCase());
@@ -239,8 +227,6 @@ async function isReadablePDF(path) {
 // ================= UPLOAD =================
 app.post('/uploadFile', upload.array('files', 10), async (req, res) => {
 
-  if (!req.session.user) return res.status(401).send("Login required");
-
   const { code, stockistName, value, type } = req.body;
   const files = req.files;
 
@@ -257,82 +243,57 @@ app.post('/uploadFile', upload.array('files', 10), async (req, res) => {
   const row = master.find(r => r.Code === code);
   const state = row?.State || "Others";
 
-  const stateFolderId = await getOrCreateFolder(state, FOLDER_ID);
-  const typeFolderId = await getOrCreateFolder(type, stateFolderId);
+  const stateFolder = await getOrCreateFolder(state, FOLDER_ID);
+  const typeFolder = await getOrCreateFolder(type, stateFolder);
 
   let uploadedFiles = [];
 
-  try {
-    for (let file of files) {
+  for (let file of files) {
 
-      if (!isValidFile(file)) {
-        fs.unlinkSync(file.path);
-        return res.json({ status: 'error', msg: 'Invalid format' });
-      }
-
-      if (file.mimetype === 'application/pdf') {
-        const ok = await isReadablePDF(file.path);
-        if (!ok) {
-          fs.unlinkSync(file.path);
-          return res.json({ status: 'error', msg: 'Unreadable PDF' });
-        }
-      }
-
-      const fileName = `${stockistName}_${code}_${type}_${Date.now()}`;
-
-      const response = await drive.files.create({
-        resource: { name: fileName, parents: [typeFolderId] },
-        media: { mimeType: file.mimetype, body: fs.createReadStream(file.path) },
-        fields: 'id'
-      });
-
-      await drive.permissions.create({
-        fileId: response.data.id,
-        requestBody: { role: 'reader', type: 'anyone' }
-      });
-
+    if (!isValidFile(file)) {
       fs.unlinkSync(file.path);
-
-      uploadedFiles.push({
-        fileName,
-        fileUrl: `https://drive.google.com/file/d/${response.data.id}/view`
-      });
+      return res.json({ status: 'error', msg: 'Invalid format' });
     }
 
-    updates[key] = {
-      files: uploadedFiles,
-      value,
-      uploadedBy: req.session.user,
-      uploadedAt: new Date().toLocaleString()
-    };
+    if (file.mimetype === 'application/pdf') {
+      const ok = await isReadablePDF(file.path);
+      if (!ok) {
+        fs.unlinkSync(file.path);
+        return res.json({ status: 'error', msg: 'Unreadable PDF' });
+      }
+    }
 
-    await writeUpdates(updates);
+    const fileName = `${stockistName}_${code}_${type}_${Date.now()}`;
 
-    res.json({ status: 'success' });
+    const response = await drive.files.create({
+      resource: { name: fileName, parents: [typeFolder] },
+      media: { mimeType: file.mimetype, body: fs.createReadStream(file.path) },
+      fields: 'id'
+    });
 
-  } catch (err) {
-    console.error("❌ Upload Error:", err);
-    res.json({ status: 'error', msg: 'Upload failed' });
+    await drive.permissions.create({
+      fileId: response.data.id,
+      requestBody: { role: 'reader', type: 'anyone' }
+    });
+
+    fs.unlinkSync(file.path);
+
+    uploadedFiles.push({
+      fileName,
+      fileUrl: `https://drive.google.com/file/d/${response.data.id}/view`
+    });
   }
-});
 
-// ================= DOWNLOAD REPORT =================
-app.get('/downloadReport', async (req, res) => {
+  updates[key] = {
+    files: uploadedFiles,
+    value,
+    uploadedBy: req.session.user,
+    uploadedAt: new Date().toLocaleString()
+  };
 
-  if (req.session.role !== 'admin') return res.send("Admin only");
+  await writeUpdates(updates);
 
-  const updates = await readUpdates();
-  const master = await downloadExcel();
-
-  const merged = mergeData(master, updates);
-
-  const wb = xlsx.utils.book_new();
-  const ws = xlsx.utils.json_to_sheet(merged);
-
-  xlsx.utils.book_append_sheet(wb, ws, "Report");
-  xlsx.writeFile(wb, "report.xlsx");
-
-  res.download("report.xlsx");
+  res.json({ status: 'success' });
 });
 
 // ================= START =================
