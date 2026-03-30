@@ -3,136 +3,50 @@
 <head>
     <title>Dashboard</title>
     <style>
-        body { font-family: Arial; padding: 20px; background: #f5f5f5; }
-        h2 { margin-bottom: 10px; }
-
-        .top-bar {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 10px;
-        }
-
-        .btn {
-            background: #1f4e79;
-            color: white;
-            padding: 6px 12px;
-            border: none;
-            cursor: pointer;
-            margin-right: 5px;
-        }
-
-        .cards {
-            display: flex;
-            gap: 15px;
-            margin: 15px 0;
-            flex-wrap: wrap;
-        }
-
-        .card {
-            background: #fff;
-            padding: 15px;
-            border-radius: 10px;
-            min-width: 150px;
-            text-align: center;
-            cursor: pointer;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            background: white;
-        }
-
-        th {
-            background: #1f6fb2;
-            color: white;
-            padding: 10px;
-        }
-
-        td {
-            padding: 8px;
-            border-bottom: 1px solid #ddd;
-        }
-
-        input[type="text"] {
-            width: 100%;
-            padding: 5px;
-        }
-
-        .search-row input {
-            width: 95%;
-        }
+        body { font-family: Arial; padding:20px; background:#f5f5f5; }
+        table { width:100%; border-collapse: collapse; background:#fff; }
+        th { background:#1f6fb2; color:#fff; padding:10px; }
+        td { padding:8px; border-bottom:1px solid #ddd; }
+        input { width:95%; padding:5px; }
     </style>
 </head>
-
 <body>
-
-<div class="top-bar">
-    <div>
-        <button class="btn">Report</button>
-        <button class="btn">ZIP</button>
-    </div>
-    <button class="btn">Logout</button>
-</div>
 
 <h2>Dashboard</h2>
 
-<div class="cards">
-    <div class="card" onclick="filterData('all')">Total<br><span id="total">0</span></div>
-    <div class="card" onclick="filterData('sss_done')">SSS Done<br><span id="sss_done">0</span></div>
-    <div class="card" onclick="filterData('sss_pending')">SSS Pending<br><span id="sss_pending">0</span></div>
-    <div class="card" onclick="filterData('aws_done')">AWS Done<br><span id="aws_done">0</span></div>
-    <div class="card" onclick="filterData('aws_pending')">AWS Pending<br><span id="aws_pending">0</span></div>
-</div>
+<button onclick="logout()">Logout</button>
 
 <table>
-    <thead>
-        <!-- SEARCH BAR ROW -->
-        <tr class="search-row">
-            <th><input type="text" id="searchState" placeholder="Search State"></th>
-            <th><input type="text" id="searchBMHQ" placeholder="Search BM HQ"></th>
-            <th><input type="text" id="searchCode" placeholder="Search Code"></th>
-            <th><input type="text" id="searchName" placeholder="Search Name"></th>
-            <th></th>
-            <th></th>
-            <th></th>
-        </tr>
+<thead>
+<tr>
+    <th>State</th>
+    <th>BM HQ</th>
+    <th>Code</th>
+    <th>Stockist Name</th>
+    <th>Value</th>
+    <th>SSS Upload</th>
+    <th>AWS Upload</th>
+</tr>
+</thead>
 
-        <!-- HEADER -->
-        <tr>
-            <th>State</th>
-            <th>BM HQ</th>
-            <th>Code</th>
-            <th>Stockist Name</th>
-            <th>Value</th>
-            <th>SSS</th>
-            <th>AWS</th>
-        </tr>
-    </thead>
-
-    <tbody id="tableBody"></tbody>
+<tbody id="tableBody"></tbody>
 </table>
 
 <script>
-let originalData = [];
-let filteredData = [];
+
+if (!localStorage.getItem("user")) {
+    window.location.href = "/";
+}
 
 async function loadData() {
     const res = await fetch('/getData');
     const data = await res.json();
 
-    originalData = data.rows || [];
-    filteredData = [...originalData];
-
-    updateCards();
-    renderTable();
-}
-
-function renderTable() {
     const tbody = document.getElementById('tableBody');
     tbody.innerHTML = '';
 
-    filteredData.forEach(row => {
+    data.rows.forEach(row => {
+
         const tr = document.createElement('tr');
 
         tr.innerHTML = `
@@ -140,67 +54,31 @@ function renderTable() {
             <td>${row["BM_HQ"] || ''}</td>
             <td>${row["Code"] || ''}</td>
             <td>${row["Stockist Name"] || ''}</td>
-            <td><input type="text" placeholder="Enter Value"></td>
-            <td>Upload</td>
-            <td>Upload</td>
+
+            <td>
+                <input type="text" placeholder="Enter Value">
+            </td>
+
+            <td>
+                <input type="file" multiple>
+            </td>
+
+            <td>
+                <input type="file" multiple>
+            </td>
         `;
 
         tbody.appendChild(tr);
     });
 }
 
-function updateCards() {
-    let total = originalData.length;
-    let sssDone = originalData.filter(r => r.SSS_Status === "Submitted").length;
-    let awsDone = originalData.filter(r => r.AWS_Status === "Submitted").length;
-
-    document.getElementById('total').innerText = total;
-    document.getElementById('sss_done').innerText = sssDone;
-    document.getElementById('sss_pending').innerText = total - sssDone;
-    document.getElementById('aws_done').innerText = awsDone;
-    document.getElementById('aws_pending').innerText = total - awsDone;
+function logout() {
+    localStorage.removeItem("user");
+    window.location.href = "/";
 }
 
-function filterData(type) {
-    if (type === 'all') {
-        filteredData = [...originalData];
-    } else if (type === 'sss_done') {
-        filteredData = originalData.filter(r => r.SSS_Status === "Submitted");
-    } else if (type === 'sss_pending') {
-        filteredData = originalData.filter(r => !r.SSS_Status);
-    } else if (type === 'aws_done') {
-        filteredData = originalData.filter(r => r.AWS_Status === "Submitted");
-    } else if (type === 'aws_pending') {
-        filteredData = originalData.filter(r => !r.AWS_Status);
-    }
-
-    renderTable();
-}
-
-function applySearch() {
-    let state = document.getElementById('searchState').value.toLowerCase();
-    let bmhq = document.getElementById('searchBMHQ').value.toLowerCase();
-    let code = document.getElementById('searchCode').value.toLowerCase();
-    let name = document.getElementById('searchName').value.toLowerCase();
-
-    filteredData = originalData.filter(row =>
-        (row["STATE"] || '').toLowerCase().includes(state) &&
-        (row["BM_HQ"] || '').toLowerCase().includes(bmhq) &&
-        (row["Code"] || '').toLowerCase().includes(code) &&
-        (row["Stockist Name"] || '').toLowerCase().includes(name)
-    );
-
-    renderTable();
-}
-
-// Search listeners
-document.getElementById('searchState').addEventListener('input', applySearch);
-document.getElementById('searchBMHQ').addEventListener('input', applySearch);
-document.getElementById('searchCode').addEventListener('input', applySearch);
-document.getElementById('searchName').addEventListener('input', applySearch);
-
-// Load data
 loadData();
+
 </script>
 
 </body>

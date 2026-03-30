@@ -16,18 +16,26 @@ const auth = new google.auth.GoogleAuth({
 
 const drive = google.drive({ version: 'v3', auth });
 
-// ================= SERVE FRONTEND =================
+// ================= SERVE STATIC =================
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json());
 
-// Home route
+// ================= ROUTES =================
+
+// Login Page
 app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+// Dashboard Page
+app.get('/dashboard', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
 });
 
 // ================= EXCEL FETCH =================
 async function downloadExcel() {
   try {
-    console.log("📥 Trying Google Sheets export...");
+    console.log("📥 Fetching Google Sheet...");
 
     const res = await drive.files.export(
       {
@@ -41,19 +49,18 @@ async function downloadExcel() {
     const sheet = wb.Sheets[wb.SheetNames[0]];
     const data = xlsx.utils.sheet_to_json(sheet);
 
-    console.log("✅ Excel rows:", data.length);
+    console.log("✅ Rows:", data.length);
 
     return data;
 
   } catch (err) {
-    console.error("❌ Excel ERROR:", err.message);
+    console.error("❌ ERROR:", err.message);
     return [];
   }
 }
 
 // ================= API =================
 app.get('/getData', async (req, res) => {
-  console.log("🔥 API HIT");
   const data = await downloadExcel();
   res.json({ rows: data });
 });

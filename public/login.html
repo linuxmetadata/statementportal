@@ -1,115 +1,37 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Statement Portal Login</title>
-  <style>
-    body {
-      font-family: Arial;
-      background: linear-gradient(135deg, #0b3d91, #1976d2);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-    }
-
-    .box {
-      background: #fff;
-      padding: 30px;
-      border-radius: 10px;
-      width: 320px;
-      text-align: center;
-    }
-
-    input, select {
-      width: 100%;
-      padding: 10px;
-      margin: 10px 0;
-    }
-
-    button {
-      width: 100%;
-      padding: 10px;
-      background: #0b3d91;
-      color: white;
-      border: none;
-      cursor: pointer;
-    }
-
-    .hidden { display: none; }
-  </style>
+    <title>Login</title>
+    <style>
+        body { font-family: Arial; display:flex; justify-content:center; align-items:center; height:100vh; }
+        .box { padding:30px; border:1px solid #ccc; border-radius:10px; }
+        input { display:block; margin:10px 0; padding:8px; width:200px; }
+        button { padding:8px 15px; background:#1f6fb2; color:#fff; border:none; }
+    </style>
 </head>
-
 <body>
 
 <div class="box">
-  <h2>Statement Portal</h2>
-
-  <select id="mode" onchange="toggleMode()">
-    <option value="admin">Admin</option>
-    <option value="user">User</option>
-  </select>
-
-  <div id="adminBox">
-    <input id="username" placeholder="Username">
-    <input id="password" type="password" placeholder="Password">
-    <button onclick="adminLogin()">Login</button>
-  </div>
-
-  <div id="userBox" class="hidden">
-    <input id="email" placeholder="Email">
-    <button onclick="userLogin()">Login</button>
-  </div>
+    <h3>Login</h3>
+    <input type="text" id="user" placeholder="Email / User ID">
+    <input type="password" id="pass" placeholder="Password (admin only)">
+    <button onclick="login()">Login</button>
 </div>
 
 <script>
+function login() {
+    const user = document.getElementById('user').value;
 
-function toggleMode() {
-  const mode = document.getElementById('mode').value;
-  document.getElementById('adminBox').style.display = mode === 'admin' ? 'block' : 'none';
-  document.getElementById('userBox').style.display = mode === 'user' ? 'block' : 'none';
+    if (!user) {
+        alert("Enter login");
+        return;
+    }
+
+    // Simple login (no validation for now)
+    localStorage.setItem("user", user);
+
+    window.location.href = "/dashboard";
 }
-
-async function adminLogin() {
-
-  const res = await fetch('/adminLogin', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    credentials: 'include',
-    body: JSON.stringify({
-      username: username.value,
-      password: password.value
-    })
-  });
-
-  const data = await res.json();
-
-  if (data.status === 'success') {
-    window.location = '/dashboard.html';
-  } else {
-    alert("Invalid login");
-  }
-}
-
-async function userLogin() {
-
-  const res = await fetch('/userLogin', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    credentials: 'include',
-    body: JSON.stringify({
-      email: email.value
-    })
-  });
-
-  const data = await res.json();
-
-  if (data.status === 'success') {
-    window.location = '/dashboard.html';
-  } else {
-    alert("Login failed");
-  }
-}
-
 </script>
 
 </body>
