@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Upload Test</title>
+</head>
+<body>
+
+<h2>Simple File Upload Test</h2>
+
+<input type="file" id="fileInput">
+<button onclick="upload()">Upload</button>
+
+<script>
+async function upload() {
+  const file = document.getElementById('fileInput').files[0];
+
+  if (!file) {
+    alert("Select file ❗");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  try {
+    const res = await fetch('/upload', {
+      method: 'POST',
+      body: formData
+    });
+
+    const data = await res.json();
+    alert(data.message);
+
+  } catch (err) {
+    alert("Upload Failed ❌");
+  }
+}
+</script>
+
+</body>
+</html>
