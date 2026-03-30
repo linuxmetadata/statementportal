@@ -13,25 +13,19 @@
             height: 100vh;
         }
 
-        .login-box {
+        .box {
             background: white;
             padding: 30px;
             border-radius: 8px;
-            width: 300px;
+            width: 320px;
             text-align: center;
             box-shadow: 0 0 10px rgba(0,0,0,0.1);
-        }
-
-        h2 {
-            margin-bottom: 20px;
         }
 
         input {
             width: 90%;
             padding: 10px;
-            margin-bottom: 15px;
-            border: 1px solid #ccc;
-            border-radius: 5px;
+            margin: 10px 0;
         }
 
         button {
@@ -40,73 +34,57 @@
             background: #1f6fb2;
             color: white;
             border: none;
-            border-radius: 5px;
             cursor: pointer;
-        }
-
-        button:hover {
-            background: #155a91;
         }
 
         .error {
             color: red;
             font-size: 13px;
-            margin-top: 10px;
         }
     </style>
 </head>
 
 <body>
 
-<div class="login-box">
+<div class="box">
     <h2>Statement Portal</h2>
 
     <input type="text" id="empId" placeholder="Enter Emp ID">
-
     <button onclick="login()">Login</button>
 
-    <div id="error" class="error"></div>
+    <div id="err" class="error"></div>
 </div>
 
 <script>
 
+// auto redirect if already logged in
+if (localStorage.getItem("empId")) {
+    window.location.href = "/dashboard";
+}
+
 async function login() {
 
     const empId = document.getElementById("empId").value.trim();
-    const errorBox = document.getElementById("error");
-
-    errorBox.innerText = "";
 
     if (!empId) {
-        errorBox.innerText = "Please enter Emp ID";
+        document.getElementById("err").innerText = "Enter Emp ID ❗";
         return;
     }
 
-    try {
+    const res = await fetch("/login", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ empId })
+    });
 
-        const res = await fetch("/login", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ empId })
-        });
+    const data = await res.json();
 
-        const data = await res.json();
-
-        if (data.success) {
-
-            // Save role
-            localStorage.setItem("role", data.role);
-            localStorage.setItem("empId", empId);
-
-            // Redirect
-            window.location.href = "/dashboard";
-
-        } else {
-            errorBox.innerText = data.message || "Invalid Emp ID";
-        }
-
-    } catch (err) {
-        errorBox.innerText = "Server error. Try again.";
+    if (data.success) {
+        localStorage.setItem("empId", empId);
+        localStorage.setItem("role", data.role);
+        window.location.href = "/dashboard";
+    } else {
+        document.getElementById("err").innerText = "Invalid Emp ID ❌";
     }
 }
 

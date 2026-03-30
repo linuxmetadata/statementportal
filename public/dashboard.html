@@ -2,14 +2,23 @@
 <html>
 <head>
 <title>Dashboard</title>
+
 <style>
-.card {display:inline-block;margin:5px;padding:10px;background:#1f6fb2;color:#fff}
+body { font-family: Arial; }
+.card { display:inline-block; margin:5px; padding:10px; background:#1f6fb2; color:#fff }
+table { border-collapse: collapse; width:100%; }
+td, th { padding:8px; border:1px solid #ccc; }
+button { padding:5px; }
 </style>
+
 </head>
 
 <body>
 
 <h2>Dashboard</h2>
+
+<button onclick="logout()">Logout</button>
+<br><br>
 
 <div>
 <span class="card">Total: <span id="t"></span></span>
@@ -19,9 +28,13 @@
 <span class="card">AWS Pending: <span id="ap"></span></span>
 </div>
 
+<br>
+
 <input id="search" placeholder="Search..." onkeyup="filterData()">
 
-<table border="1">
+<br><br>
+
+<table>
 <thead>
 <tr>
 <th>State</th>
@@ -33,84 +46,174 @@
 <th>AWS</th>
 </tr>
 </thead>
+
 <tbody id="body"></tbody>
 </table>
 
 <script>
-let all=[], uploads={};
 
-async function load(){
- const r=await fetch('/getData');
- const d=await r.json();
- all=d.rows; uploads=d.uploads||{};
- render(all); cards();
+let all = [];
+let uploads = {};
+
+async function load() {
+
+    const res = await fetch("/getData");
+
+    // if session expired → redirect
+    if (res.status === 302 || res.redirected) {
+        window.location.href = "/";
+        return;
+    }
+
+    const data = await res.json();
+
+    all = data.rows;
+    uploads = data.uploads || {};
+
+    render(all);
+    cards();
 }
 
-function render(data){
- let h='';
- data.forEach(r=>{
-  const s=r.Code+"_SSS", a=r.Code+"_AWS";
-  h+=`<tr>
-  <td>${r.STATE}</td>
-  <td>${r.BM_HQ}</td>
-  <td>${r.Code}</td>
-  <td>${r["Stockist Name"]}</td>
-  <td><input id="v_${r.Code}"></td>
-  <td>${cell(r,s,'SSS')}</td>
-  <td>${cell(r,a,'AWS')}</td>
-  </tr>`;
- });
- document.getElementById("body").innerHTML=h;
+// ================= RENDER =================
+function render(data) {
+
+    let html = "";
+
+    data.forEach(r => {
+
+        const sssKey = r.Code + "_SSS";
+        const awsKey = r.Code + "_AWS";
+
+        html += `
+        <tr>
+            <td>${r.STATE}</td>
+            <td>${r.BM_HQ}</td>
+            <td>${r.Code}</td>
+            <td>${r["Stockist Name"]}</td>
+
+            <td>
+                <input id="v_${r.Code}" placeholder="Value">
+            </td>
+
+            <td>${cell(r, sssKey, 'SSS')}</td>
+            <td>${cell(r, awsKey, 'AWS')}</td>
+        </tr>`;
+    });
+
+    document.getElementById("body").innerHTML = html;
 }
 
-function cell(r,key,type){
- const role=localStorage.role;
- if(uploads[key]){
-  return `<a href="${uploads[key].links[0]}" target="_blank">View</a>
-  ${role==='admin'?`<button onclick="del('${key}')">Delete</button>`:''}`;
- }
- if(role!=='admin') return '-';
- return `<input type="file" multiple id="f_${key}">
- <button onclick="up('${r.Code}','${r.STATE}','${r["Stockist Name"]}','${type}','${key}')">Upload</button>`;
+// ================= CELL =================
+function cell(r, key, type) {
+
+    const role = localStorage.getItem("role");
+
+    if (uploads[key]) {
+        return `
+        <a href="${uploads[key].links[0]}" target="_blank">View</a>
+        ${role === 'admin' ? `<button onclick="del('${key}')">Delete</button>` : ''}
+        `;
+    }
+
+    if (role !== 'admin') return "-";
+
+    return `
+    <input type="file" multiple id="f_${key}">
+    <button onclick="upload('${r.Code}','${r.STATE}','${r["Stockist Name"]}','${type}','${key}')">Upload</button>
+    `;
 }
 
-async function up(c,s,n,t,k){
- const files=document.getElementById("f_"+k).files;
- const v=document.getElementById("v_"+c).value;
- if(!v)return alert("Value mandatory");
- const fd=new FormData();
- for(let f of files)fd.append("files",f);
- fd.append("code",c);fd.append("state",s);fd.append("name",n);
- fd.append("type",t);fd.append("value",v);
- fd.append("empId",localStorage.empId);
- const r=await fetch('/upload',{method:'POST',body:fd});
- alert((await r.json()).message); load();
+// ================= UPLOAD =================
+async function upload(code, state, name, type, key) {
+
+    const files = document.getElementById("f_" + key).files;
+    const value = document.getElementById("v_" + code).value;
+
+    if (!value) {
+        alert("Value mandatory ❗");
+        return;
+    }
+
+    if (files.length === 0) {
+        alert("Select file ❗");
+        return;
+    }
+
+    const fd = new FormData();
+
+    for (let f of files) fd.append("files", f);
+
+    fd.append("code", code);
+    fd.append("state", state);
+    fd.append("name", name);
+    fd.append("type", type);
+    fd.append("value", value);
+
+    const res = await fetch("/upload", {
+        method: "POST",
+        body: fd
+    });
+
+    const data = await res.json();
+
+    alert(data.message);
+    load();
 }
 
-async function del(k){
- await fetch('/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})});
- load();
+// ================= DELETE =================
+async function del(key) {
+
+    await fetch("/delete", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ key })
+    });
+
+    load();
 }
 
-function filterData(){
- const v=search.value.toLowerCase();
- render(all.filter(r=>JSON.stringify(r).toLowerCase().includes(v)));
+// ================= FILTER =================
+function filterData() {
+
+    const val = document.getElementById("search").value.toLowerCase();
+
+    const filtered = all.filter(r =>
+        (r.STATE || "").toLowerCase().includes(val) ||
+        (r.Code || "").toLowerCase().includes(val) ||
+        (r["Stockist Name"] || "").toLowerCase().includes(val)
+    );
+
+    render(filtered);
 }
 
-function cards(){
- let t=all.length,sd=0,ad=0;
- Object.keys(uploads).forEach(k=>{
-  if(k.includes("SSS"))sd++; else ad++;
- });
- t&&(sp=t-sd,ap=t-ad);
- document.getElementById("t").innerText=t;
- document.getElementById("sd").innerText=sd;
- document.getElementById("sp").innerText=sp;
- document.getElementById("ad").innerText=ad;
- document.getElementById("ap").innerText=ap;
+// ================= CARDS =================
+function cards() {
+
+    let total = all.length;
+    let sDone = 0;
+    let aDone = 0;
+
+    Object.keys(uploads).forEach(k => {
+        if (k.includes("SSS")) sDone++;
+        else aDone++;
+    });
+
+    document.getElementById("t").innerText = total;
+    document.getElementById("sd").innerText = sDone;
+    document.getElementById("sp").innerText = total - sDone;
+    document.getElementById("ad").innerText = aDone;
+    document.getElementById("ap").innerText = total - aDone;
 }
 
+// ================= LOGOUT =================
+function logout() {
+    localStorage.clear();
+    window.location.href = "/logout";
+}
+
+// ================= INIT =================
 load();
+
 </script>
 
 </body>

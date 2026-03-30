@@ -1,14 +1,22 @@
 require("dotenv").config();
 const express = require("express");
 const multer = require("multer");
+const session = require("express-session");
 const { google } = require("googleapis");
 const fs = require("fs");
 const path = require("path");
 const xlsx = require("xlsx");
-const archiver = require("archiver");
 const pdfParse = require("pdf-parse");
 
 const app = express();
+
+// ================= SESSION =================
+app.use(session({
+  secret: "portal_secret_key",
+  resave: false,
+  saveUninitialized: true,
+}));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -31,23 +39,31 @@ const upload = multer({ dest: "uploads/" });
 // ================= CONFIG =================
 const DATA_FILE = "portal_data.json";
 
+// ================= AUTH MIDDLEWARE =================
+function isAuth(req, res, next) {
+  if (req.session.user) return next();
+  return res.redirect("/");
+}
+
+function isAdmin(req, res, next) {
+  if (req.session.user?.role === "admin") return next();
+  return res.json({ message: "Admin only ❌" });
+}
+
 // ================= EXCEL =================
 async function getExcelData() {
-  const res = await drive.files.export(
-    {
-      fileId: process.env.EXCEL_FILE_ID,
-      mimeType:
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    },
-    { responseType: "arraybuffer" }
-  );
+  const res = await drive.files.export({
+    fileId: process.env.EXCEL_FILE_ID,
+    mimeType:
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  }, { responseType: "arraybuffer" });
 
   const wb = xlsx.read(res.data, { type: "buffer" });
   const sheet = wb.Sheets[wb.SheetNames[0]];
   return xlsx.utils.sheet_to_json(sheet);
 }
 
-// ================= DATA FILE =================
+// ================= DATA =================
 async function loadData() {
   try {
     const list = await drive.files.list({
@@ -103,21 +119,29 @@ app.post("/login", async (req, res) => {
 
   if (!user) return res.json({ success: false });
 
-  res.json({
-    success: true,
-    role: empId === "admin" ? "admin" : "user",
+  const role = empId === "admin" ? "admin" : "user";
+
+  req.session.user = { empId, role };
+
+  res.json({ success: true, role });
+});
+
+// ================= LOGOUT =================
+app.get("/logout", (req, res) => {
+  req.session.destroy(() => {
+    res.redirect("/");
   });
 });
 
 // ================= GET DATA =================
-app.get("/getData", async (req, res) => {
+app.get("/getData", isAuth, async (req, res) => {
   const excel = await getExcelData();
   const uploads = await loadData();
 
   res.json({ rows: excel, uploads });
 });
 
-// ================= FILE VALIDATION =================
+// ================= VALIDATION =================
 async function validateFile(file) {
   const allowed = [
     "application/pdf",
@@ -140,9 +164,9 @@ async function validateFile(file) {
 }
 
 // ================= UPLOAD =================
-app.post("/upload", upload.array("files"), async (req, res) => {
+app.post("/upload", isAuth, upload.array("files"), async (req, res) => {
   try {
-    const { code, state, name, type, value, empId } = req.body;
+    const { code, state, name, type, value } = req.body;
 
     if (!value) return res.json({ message: "Value mandatory ❗" });
 
@@ -164,10 +188,10 @@ app.post("/upload", upload.array("files"), async (req, res) => {
     for (let f of req.files) {
       if (!(await validateFile(f))) {
         fs.unlinkSync(f.path);
-        return res.json({ message: "Invalid format ❌" });
+        return res.json({ message: "Invalid file ❌" });
       }
 
-      const uploadRes = await drive.files.create({
+      const up = await drive.files.create({
         requestBody: {
           name: `${name}_${code}_${type}_${Date.now()}`,
           parents: [folder.data.id],
@@ -178,75 +202,48 @@ app.post("/upload", upload.array("files"), async (req, res) => {
         },
       });
 
-      links.push(`https://drive.google.com/file/d/${uploadRes.data.id}/view`);
+      links.push(`https://drive.google.com/file/d/${up.data.id}/view`);
       fs.unlinkSync(f.path);
     }
 
     data[key] = {
       value,
       links,
-      submittedBy: empId,
+      submittedBy: req.session.user.empId,
       date: new Date().toLocaleString(),
-      type,
-      state,
     };
 
     await saveData(data);
 
     res.json({ message: "Upload Success ✅" });
-  } catch (e) {
-    console.error(e);
+
+  } catch (err) {
+    console.error(err);
     res.json({ message: "Upload Failed ❌" });
   }
 });
 
-// ================= DELETE =================
-app.post("/delete", async (req, res) => {
+// ================= DELETE (ADMIN ONLY) =================
+app.post("/delete", isAuth, isAdmin, async (req, res) => {
   const data = await loadData();
   delete data[req.body.key];
   await saveData(data);
   res.json({ message: "Deleted ✅" });
 });
 
-// ================= REPORT DOWNLOAD =================
-app.get("/download-report", async (req, res) => {
-  const excel = await getExcelData();
-  const uploads = await loadData();
+// ================= STATIC =================
+app.use("/static", express.static(path.join(__dirname, "public")));
 
-  const report = excel.map((r) => {
-    const sss = uploads[r.Code + "_SSS"];
-    const aws = uploads[r.Code + "_AWS"];
-
-    return {
-      ...r,
-      SSS_Status: sss ? "Done" : "Pending",
-      AWS_Status: aws ? "Done" : "Pending",
-      Submitted_By: sss?.submittedBy || aws?.submittedBy || "",
-      Date: sss?.date || aws?.date || "",
-    };
-  });
-
-  const wb = xlsx.utils.book_new();
-  const ws = xlsx.utils.json_to_sheet(report);
-  xlsx.utils.book_append_sheet(wb, ws, "Report");
-
-  const file = "report.xlsx";
-  xlsx.writeFile(wb, file);
-
-  res.download(file);
+// ================= ROUTES =================
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public/login.html"));
 });
 
-// ================= STATIC =================
-app.use(express.static(path.join(__dirname, "public")));
+app.get("/dashboard", isAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, "public/dashboard.html"));
+});
 
-app.get("/", (req, res) =>
-  res.sendFile(path.join(__dirname, "public/login.html"))
-);
-
-app.get("/dashboard", (req, res) =>
-  res.sendFile(path.join(__dirname, "public/dashboard.html"))
-);
-
+// ================= START =================
 app.listen(process.env.PORT || 10000, () =>
-  console.log("🚀 Running")
+  console.log("🔐 Secure Server Running")
 );
