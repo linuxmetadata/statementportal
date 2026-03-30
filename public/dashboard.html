@@ -5,8 +5,9 @@
   <style>
     body { font-family: Arial; }
     table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 8px; border: 1px solid #ccc; }
-    input { width: 100px; }
+    th, td { padding: 8px; border: 1px solid #ccc; text-align: left; }
+    input { width: 120px; }
+    button { padding: 4px 8px; }
   </style>
 </head>
 
@@ -15,6 +16,8 @@
 <h2>Dashboard</h2>
 
 <input id="search" placeholder="Search..." onkeyup="filterData()" />
+
+<br><br>
 
 <table>
   <thead>
@@ -31,20 +34,24 @@
 </table>
 
 <script>
+
 let allData = [];
 
+// ================= LOAD DATA =================
 async function loadData() {
   const res = await fetch('/getData');
   const data = await res.json();
   allData = data.rows;
-  render(data.rows);
+  render(allData);
 }
 
+// ================= RENDER =================
 function render(rows) {
   const body = document.getElementById('tableBody');
   body.innerHTML = '';
 
   rows.forEach(row => {
+
     const tr = document.createElement('tr');
 
     tr.dataset.code = row.Code;
@@ -57,16 +64,16 @@ function render(rows) {
       <td>${row["Stockist Name"]}</td>
 
       <td>
-        <input class="valueInput" placeholder="Value"/>
+        <input class="valueInput" placeholder="Value" />
       </td>
 
       <td>
-        <input type="file" multiple onchange="selectFile(this)">
+        <input type="file" multiple class="sssFile">
         <button onclick="uploadFile(this, 'SSS')">Upload</button>
       </td>
 
       <td>
-        <input type="file" multiple onchange="selectFile(this)">
+        <input type="file" multiple class="awsFile">
         <button onclick="uploadFile(this, 'AWS')">Upload</button>
       </td>
     `;
@@ -75,26 +82,43 @@ function render(rows) {
   });
 }
 
-// SEARCH
+// ================= SEARCH =================
 function filterData() {
   const val = document.getElementById('search').value.toLowerCase();
+
   const filtered = allData.filter(r =>
     r.STATE.toLowerCase().includes(val) ||
     r.Code.toLowerCase().includes(val) ||
     r["Stockist Name"].toLowerCase().includes(val)
   );
+
   render(filtered);
 }
 
-// UPLOAD
+// ================= UPLOAD =================
 async function uploadFile(btn, type) {
   const row = btn.closest('tr');
 
-  const files = row.querySelector('input[type="file"]').files;
+  let fileInput;
+
+  if (type === 'SSS') {
+    fileInput = row.querySelector('.sssFile');
+  } else {
+    fileInput = row.querySelector('.awsFile');
+  }
+
+  const files = fileInput.files;
   const value = row.querySelector('.valueInput').value;
 
-  if (!files.length) return alert("Select file ❗");
-  if (!value) return alert("Enter value ❗");
+  if (!files.length) {
+    alert("Select file ❗");
+    return;
+  }
+
+  if (!value) {
+    alert("Enter value ❗");
+    return;
+  }
 
   const formData = new FormData();
 
@@ -108,16 +132,28 @@ async function uploadFile(btn, type) {
   formData.append("type", type);
   formData.append("value", value);
 
-  const res = await fetch('/upload', {
-    method: 'POST',
-    body: formData
-  });
+  try {
+    const res = await fetch('/upload', {
+      method: 'POST',
+      body: formData
+    });
 
-  const data = await res.json();
-  alert(data.message);
+    const data = await res.json();
+
+    alert(data.message);
+
+    if (data.message.includes("Success")) {
+      fileInput.value = ""; // reset file
+    }
+
+  } catch (err) {
+    alert("Upload Failed ❌");
+  }
 }
 
+// ================= INIT =================
 loadData();
+
 </script>
 
 </body>
