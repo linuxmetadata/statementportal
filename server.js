@@ -59,19 +59,7 @@ app.get('/getData', async (req, res) => {
   res.json({ rows: data });
 });
 
-// ================= CREATE FOLDER =================
-async function createFolder(name, parentId) {
-  const res = await drive.files.create({
-    requestBody: {
-      name: name,
-      mimeType: 'application/vnd.google-apps.folder',
-      parents: [parentId]
-    }
-  });
-  return res.data.id;
-}
-
-// ================= UPLOAD =================
+// ================= UPLOAD (FINAL FIX) =================
 app.post('/upload', upload.array('files'), async (req, res) => {
   try {
     console.log("BODY:", req.body);
@@ -79,40 +67,45 @@ app.post('/upload', upload.array('files'), async (req, res) => {
     const { code, type, state, name, value } = req.body;
 
     if (!req.files || req.files.length === 0) {
-      return res.json({ message: "No file selected ❌" });
+      return res.json({ message: "No file ❌" });
     }
 
     if (!code || !type || !state || !name || !value) {
       return res.json({ message: "Missing fields ❌" });
     }
 
-    const rootFolder = process.env.FOLDER_ID;
-
-    const stateFolder = await createFolder(state, rootFolder);
-    const typeFolder = await createFolder(type, stateFolder);
+    const parentFolder = process.env.FOLDER_ID;
 
     for (let file of req.files) {
-      const stream = new PassThrough();
-      stream.end(file.buffer);
+      try {
+        const stream = new PassThrough();
+        stream.end(file.buffer);
 
-      const fileName = `${name}_${code}_${type}_${value}_${file.originalname}`;
+        const fileName = `${state}_${name}_${code}_${type}_${value}_${file.originalname}`;
 
-      await drive.files.create({
-        requestBody: {
-          name: fileName,
-          parents: [typeFolder]
-        },
-        media: {
-          mimeType: file.mimetype,
-          body: stream
-        }
-      });
+        const response = await drive.files.create({
+          requestBody: {
+            name: fileName,
+            parents: [parentFolder]
+          },
+          media: {
+            mimeType: file.mimetype,
+            body: stream
+          }
+        });
+
+        console.log("UPLOAD SUCCESS:", response.data.id);
+
+      } catch (fileErr) {
+        console.error("❌ FILE UPLOAD ERROR:", fileErr);
+        return res.json({ message: "Upload Failed ❌" });
+      }
     }
 
     res.json({ message: "Upload Success ✅" });
 
   } catch (err) {
-    console.error("❌ UPLOAD ERROR:", err);
+    console.error("❌ GLOBAL ERROR:", err);
     res.json({ message: "Upload Failed ❌" });
   }
 });
