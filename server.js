@@ -10,7 +10,6 @@ const { PassThrough } = require('stream');
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// ================= MULTER =================
 const upload = multer({ storage: multer.memoryStorage() });
 
 // ================= GOOGLE AUTH =================
@@ -26,18 +25,15 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
 // ================= ROUTES =================
-
-// Login page
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
-// Dashboard page
 app.get('/dashboard', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
 });
 
-// ================= GET GOOGLE SHEET DATA =================
+// ================= GET DATA =================
 async function getSheetData() {
   try {
     const response = await drive.files.export(
@@ -63,7 +59,7 @@ app.get('/getData', async (req, res) => {
   res.json({ rows: data });
 });
 
-// ================= CREATE FOLDER (IF NOT EXISTS) =================
+// ================= CREATE FOLDER =================
 async function createFolder(name, parentId) {
   const res = await drive.files.create({
     requestBody: {
@@ -75,33 +71,31 @@ async function createFolder(name, parentId) {
   return res.data.id;
 }
 
-// ================= UPLOAD FILES =================
+// ================= UPLOAD =================
 app.post('/upload', upload.array('files'), async (req, res) => {
   try {
-    const { code, type, state, name } = req.body;
+    console.log("BODY:", req.body);
+
+    const { code, type, state, name, value } = req.body;
 
     if (!req.files || req.files.length === 0) {
-      return res.json({ message: "No files selected ❌" });
+      return res.json({ message: "No file selected ❌" });
     }
 
-    if (!code || !type || !state || !name) {
-      return res.json({ message: "Missing required data ❌" });
+    if (!code || !type || !state || !name || !value) {
+      return res.json({ message: "Missing fields ❌" });
     }
 
     const rootFolder = process.env.FOLDER_ID;
 
-    // 🔹 Create State Folder
     const stateFolder = await createFolder(state, rootFolder);
-
-    // 🔹 Create Type Folder (SSS / AWS)
     const typeFolder = await createFolder(type, stateFolder);
 
     for (let file of req.files) {
+      const stream = new PassThrough();
+      stream.end(file.buffer);
 
-      const bufferStream = new PassThrough();
-      bufferStream.end(file.buffer);
-
-      const fileName = `${name}_${code}_${type}_${file.originalname}`;
+      const fileName = `${name}_${code}_${type}_${value}_${file.originalname}`;
 
       await drive.files.create({
         requestBody: {
@@ -110,7 +104,7 @@ app.post('/upload', upload.array('files'), async (req, res) => {
         },
         media: {
           mimeType: file.mimetype,
-          body: bufferStream
+          body: stream
         }
       });
     }
@@ -118,12 +112,12 @@ app.post('/upload', upload.array('files'), async (req, res) => {
     res.json({ message: "Upload Success ✅" });
 
   } catch (err) {
-    console.error("❌ UPLOAD ERROR FULL:", err);
+    console.error("❌ UPLOAD ERROR:", err);
     res.json({ message: "Upload Failed ❌" });
   }
 });
 
-// ================= START SERVER =================
+// ================= START =================
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🚀 Running on ${PORT}`);
 });

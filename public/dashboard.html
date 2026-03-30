@@ -1,285 +1,123 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Dashboard</title>
-
-<style>
-body { font-family: Arial; padding:20px; background:#f5f5f5; }
-
-.top { display:flex; justify-content:space-between; }
-
-.cards { display:flex; gap:10px; margin:15px 0; flex-wrap:wrap; }
-
-.card {
-    background:#1f6fb2;
-    color:white;
-    padding:10px;
-    border-radius:6px;
-    cursor:pointer;
-}
-
-.search input { padding:6px; margin-right:5px; }
-
-table {
-    width:100%;
-    border-collapse: collapse;
-    background:white;
-}
-
-th {
-    background:#1f6fb2;
-    color:white;
-    padding:8px;
-}
-
-td {
-    padding:6px;
-    border-bottom:1px solid #ddd;
-}
-
-button { padding:4px 6px; margin:2px; cursor:pointer; }
-</style>
+  <title>Dashboard</title>
+  <style>
+    body { font-family: Arial; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px; border: 1px solid #ccc; }
+    input { width: 100px; }
+  </style>
 </head>
 
 <body>
 
-<div class="top">
-    <h2>Dashboard</h2>
-    <button onclick="logout()">Logout</button>
-</div>
+<h2>Dashboard</h2>
 
-<!-- CARDS -->
-<div class="cards">
-    <div class="card" onclick="filterType('all')">Total: <span id="total"></span></div>
-    <div class="card" onclick="filterType('sss_done')">SSS Received: <span id="sss_done"></span></div>
-    <div class="card" onclick="filterType('sss_pending')">SSS Pending: <span id="sss_pending"></span></div>
-    <div class="card" onclick="filterType('aws_done')">AWS Received: <span id="aws_done"></span></div>
-    <div class="card" onclick="filterType('aws_pending')">AWS Pending: <span id="aws_pending"></span></div>
-</div>
-
-<!-- SEARCH -->
-<div class="search">
-    <input id="s1" placeholder="State">
-    <input id="s2" placeholder="BM HQ">
-    <input id="s3" placeholder="Code">
-    <input id="s4" placeholder="Name">
-</div>
+<input id="search" placeholder="Search..." onkeyup="filterData()" />
 
 <table>
-<thead>
-<tr>
-    <th>State</th>
-    <th>BM HQ</th>
-    <th>Code</th>
-    <th>Name</th>
-    <th>Value</th>
-    <th>SSS</th>
-    <th>AWS</th>
-</tr>
-</thead>
-
-<tbody id="tableBody"></tbody>
+  <thead>
+    <tr>
+      <th>State</th>
+      <th>Code</th>
+      <th>Name</th>
+      <th>Value</th>
+      <th>SSS</th>
+      <th>AWS</th>
+    </tr>
+  </thead>
+  <tbody id="tableBody"></tbody>
 </table>
 
 <script>
+let allData = [];
 
-const role = localStorage.getItem("role");
-if (!role) window.location.href = "/";
-
-let originalData = [];
-let filteredData = [];
-let uploads = {};
-let values = {};
-
-// 🚀 LOAD DATA (ALL ROWS, FAST RENDER)
-async function loadData(){
-    const res = await fetch('/getData');
-    const data = await res.json();
-
-    originalData = data.rows || [];
-    filteredData = [...originalData];
-
-    renderTable();
-    updateCards();
+async function loadData() {
+  const res = await fetch('/getData');
+  const data = await res.json();
+  allData = data.rows;
+  render(data.rows);
 }
 
-// 🧾 RENDER TABLE (OPTIMIZED)
-function renderTable(){
+function render(rows) {
+  const body = document.getElementById('tableBody');
+  body.innerHTML = '';
 
-    const table = document.getElementById("tableBody");
-    table.innerHTML = "";
+  rows.forEach(row => {
+    const tr = document.createElement('tr');
 
-    filteredData.slice(0, 200).forEach(r => {   // limit 200 for speed
+    tr.dataset.code = row.Code;
+    tr.dataset.name = row["Stockist Name"];
+    tr.dataset.state = row.STATE;
 
-        const code = r.Code;
+    tr.innerHTML = `
+      <td>${row.STATE}</td>
+      <td>${row.Code}</td>
+      <td>${row["Stockist Name"]}</td>
 
-        table.innerHTML += `
-        <tr>
-            <td>${r.STATE}</td>
-            <td>${r.BM_HQ}</td>
-            <td>${code}</td>
-            <td>${r["Stockist Name"]}</td>
+      <td>
+        <input class="valueInput" placeholder="Value"/>
+      </td>
 
-            <td>
-                <input value="${values[code]||''}" 
-                onchange="values['${code}']=this.value">
-            </td>
+      <td>
+        <input type="file" multiple onchange="selectFile(this)">
+        <button onclick="uploadFile(this, 'SSS')">Upload</button>
+      </td>
 
-            <td>${renderCell(r,'SSS')}</td>
-            <td>${renderCell(r,'AWS')}</td>
-        </tr>
-        `;
-    });
-}
-
-// 📦 CELL
-function renderCell(row,type){
-
-    const key = row.Code+"_"+type;
-
-    if(uploads[key]){
-        return `
-        <button onclick="view()">View</button>
-        ${role==='admin'?`<button onclick="remove('${key}')">Delete</button>`:''}
-        `;
-    }
-
-    if(role!=='admin') return '-';
-
-    return `
-    <input type="file" multiple onchange="selectFile(event,'${row.Code}','${type}','${row.STATE}','${row["Stockist Name"]}')">
-    <button onclick="upload('${row.Code}','${type}','${row.STATE}','${row["Stockist Name"]}')">Upload</button>
+      <td>
+        <input type="file" multiple onchange="selectFile(this)">
+        <button onclick="uploadFile(this, 'AWS')">Upload</button>
+      </td>
     `;
+
+    body.appendChild(tr);
+  });
 }
 
-// 📂 SELECT
-function selectFile(e,code,type,state,name){
-    uploads[code+"_"+type] = {
-        files:e.target.files,
-        state,
-        name
-    };
+// SEARCH
+function filterData() {
+  const val = document.getElementById('search').value.toLowerCase();
+  const filtered = allData.filter(r =>
+    r.STATE.toLowerCase().includes(val) ||
+    r.Code.toLowerCase().includes(val) ||
+    r["Stockist Name"].toLowerCase().includes(val)
+  );
+  render(filtered);
 }
 
-// 🚀 UPLOAD (FIXED)
-async function upload(code,type,state,name){
+// UPLOAD
+async function uploadFile(btn, type) {
+  const row = btn.closest('tr');
 
-    if(!values[code]){
-        alert("Value mandatory ❗");
-        return;
-    }
+  const files = row.querySelector('input[type="file"]').files;
+  const value = row.querySelector('.valueInput').value;
 
-    const key = code+"_"+type;
-    const data = uploads[key];
+  if (!files.length) return alert("Select file ❗");
+  if (!value) return alert("Enter value ❗");
 
-    if(!data || !data.files){
-        alert("Select file ❗");
-        return;
-    }
+  const formData = new FormData();
 
-    const form = new FormData();
-    form.append('code', code);
-    form.append('type', type);
-    form.append('state', state);
-    form.append('name', name);
+  for (let f of files) {
+    formData.append("files", f);
+  }
 
-    for(let f of data.files){
-        form.append('files', f);
-    }
+  formData.append("code", row.dataset.code);
+  formData.append("name", row.dataset.name);
+  formData.append("state", row.dataset.state);
+  formData.append("type", type);
+  formData.append("value", value);
 
-    try{
-        const res = await fetch('/upload',{method:'POST',body:form});
-        const r = await res.json();
+  const res = await fetch('/upload', {
+    method: 'POST',
+    body: formData
+  });
 
-        alert(r.message);
-
-        uploads[key] = {done:true};
-
-        updateCards();
-        renderTable();
-
-    }catch(e){
-        alert("Upload failed ❌");
-    }
+  const data = await res.json();
+  alert(data.message);
 }
 
-// 📊 CARDS (FIXED)
-function updateCards(){
-
-    let total = filteredData.length;
-
-    let sssDone = filteredData.filter(r=>uploads[r.Code+"_SSS"]).length;
-    let awsDone = filteredData.filter(r=>uploads[r.Code+"_AWS"]).length;
-
-    document.getElementById("total").innerText = total;
-    document.getElementById("sss_done").innerText = sssDone;
-    document.getElementById("sss_pending").innerText = total - sssDone;
-    document.getElementById("aws_done").innerText = awsDone;
-    document.getElementById("aws_pending").innerText = total - awsDone;
-}
-
-// 🎯 CARD FILTER
-function filterType(type){
-
-    if(type==='all') filteredData=[...originalData];
-
-    if(type==='sss_done')
-        filteredData=originalData.filter(r=>uploads[r.Code+"_SSS"]);
-
-    if(type==='sss_pending')
-        filteredData=originalData.filter(r=>!uploads[r.Code+"_SSS"]);
-
-    if(type==='aws_done')
-        filteredData=originalData.filter(r=>uploads[r.Code+"_AWS"]);
-
-    if(type==='aws_pending')
-        filteredData=originalData.filter(r=>!uploads[r.Code+"_AWS"]);
-
-    updateCards();
-    renderTable();
-}
-
-// 🔍 SEARCH (FIXED)
-document.querySelectorAll('.search input').forEach(i=>{
-    i.addEventListener('input', ()=>{
-        const s1 = document.getElementById('s1').value.toLowerCase();
-        const s2 = document.getElementById('s2').value.toLowerCase();
-        const s3 = document.getElementById('s3').value.toLowerCase();
-        const s4 = document.getElementById('s4').value.toLowerCase();
-
-        filteredData = originalData.filter(r =>
-            (r.STATE||'').toLowerCase().includes(s1) &&
-            (r.BM_HQ||'').toLowerCase().includes(s2) &&
-            (r.Code||'').toLowerCase().includes(s3) &&
-            (r["Stockist Name"]||'').toLowerCase().includes(s4)
-        );
-
-        updateCards();
-        renderTable();
-    });
-});
-
-// 👁 VIEW
-function view(){
-    alert("File link next step");
-}
-
-// ❌ DELETE
-function remove(key){
-    delete uploads[key];
-    updateCards();
-    renderTable();
-}
-
-// 🚪 LOGOUT
-function logout(){
-    localStorage.clear();
-    window.location.href = "/";
-}
-
-// INIT
 loadData();
-
 </script>
 
 </body>
