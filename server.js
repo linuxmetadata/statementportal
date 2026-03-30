@@ -3,6 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const { google } = require('googleapis');
 const xlsx = require('xlsx');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -10,12 +11,20 @@ const PORT = process.env.PORT || 3000;
 // ================= GOOGLE AUTH =================
 const auth = new google.auth.GoogleAuth({
   credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
-  scopes: ['https://www.googleapis.com/auth/drive']
+  scopes: ['https://www.googleapis.com/auth/drive.readonly']
 });
 
 const drive = google.drive({ version: 'v3', auth });
 
-// ================= TEST EXCEL =================
+// ================= SERVE FRONTEND =================
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Home route
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
+});
+
+// ================= EXCEL FETCH =================
 async function downloadExcel() {
   try {
     console.log("📥 Trying Google Sheets export...");
@@ -44,13 +53,9 @@ async function downloadExcel() {
 
 // ================= API =================
 app.get('/getData', async (req, res) => {
-
   console.log("🔥 API HIT");
-
   const data = await downloadExcel();
-
   res.json({ rows: data });
-
 });
 
 // ================= START =================
