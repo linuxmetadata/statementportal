@@ -10,7 +10,7 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ================= GOOGLE AUTH (YOUR ACCOUNT) =================
+// ================= GOOGLE OAUTH =================
 
 const oauth2Client = new google.auth.OAuth2(
   process.env.CLIENT_ID,
@@ -18,7 +18,29 @@ const oauth2Client = new google.auth.OAuth2(
   process.env.REDIRECT_URI
 );
 
-// Load saved token
+// LOGIN URL
+app.get("/auth", (req, res) => {
+  const url = oauth2Client.generateAuthUrl({
+    access_type: "offline",
+    scope: ["https://www.googleapis.com/auth/drive"],
+  });
+  res.redirect(url);
+});
+
+// CALLBACK
+app.get("/oauth2callback", async (req, res) => {
+  const code = req.query.code;
+
+  const { tokens } = await oauth2Client.getToken(code);
+  oauth2Client.setCredentials(tokens);
+
+  // SAVE TOKEN
+  fs.writeFileSync("token.json", JSON.stringify(tokens));
+
+  res.send("✅ Google Drive Connected! You can close this.");
+});
+
+// LOAD TOKEN
 if (fs.existsSync("token.json")) {
   oauth2Client.setCredentials(JSON.parse(fs.readFileSync("token.json")));
 }
@@ -28,7 +50,7 @@ const drive = google.drive({ version: "v3", auth: oauth2Client });
 // ================= MULTER =================
 const upload = multer({ dest: "uploads/" });
 
-// ================= READ EXCEL =================
+// ================= EXCEL =================
 async function getExcelData() {
   const response = await drive.files.export(
     {
@@ -59,9 +81,7 @@ app.post("/login", async (req, res) => {
       return res.json({ success: false, message: "Invalid Emp ID ❌" });
     }
 
-    // ROLE LOGIC
-    let role = "user";
-    if (empId === "admin") role = "admin";
+    let role = empId === "admin" ? "admin" : "user";
 
     res.json({ success: true, role });
 
