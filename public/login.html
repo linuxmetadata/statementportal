@@ -1,39 +1,115 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Login</title>
+    <title>Statement Portal Login</title>
+
+    <style>
+        body {
+            font-family: Arial;
+            background: #f5f5f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        .login-box {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            width: 300px;
+            text-align: center;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+
+        h2 {
+            margin-bottom: 20px;
+        }
+
+        input {
+            width: 90%;
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        button {
+            width: 95%;
+            padding: 10px;
+            background: #1f6fb2;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #155a91;
+        }
+
+        .error {
+            color: red;
+            font-size: 13px;
+            margin-top: 10px;
+        }
+    </style>
 </head>
+
 <body>
 
-<h2>Login with Emp ID</h2>
+<div class="login-box">
+    <h2>Statement Portal</h2>
 
-<input id="empId" placeholder="Enter Emp ID">
-<button onclick="login()">Login</button>
+    <input type="text" id="empId" placeholder="Enter Emp ID">
+
+    <button onclick="login()">Login</button>
+
+    <div id="error" class="error"></div>
+</div>
 
 <script>
+
 async function login() {
-  const empId = document.getElementById("empId").value;
 
-  if (!empId) {
-    alert("Enter Emp ID");
-    return;
-  }
+    const empId = document.getElementById("empId").value.trim();
+    const errorBox = document.getElementById("error");
 
-  const res = await fetch("/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ empId })
-  });
+    errorBox.innerText = "";
 
-  const data = await res.json();
+    if (!empId) {
+        errorBox.innerText = "Please enter Emp ID";
+        return;
+    }
 
-  if (data.success) {
-    localStorage.setItem("role", data.role);
-    window.location.href = "/dashboard";
-  } else {
-    alert(data.message);
-  }
+    try {
+
+        const res = await fetch("/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ empId })
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+
+            // Save role
+            localStorage.setItem("role", data.role);
+            localStorage.setItem("empId", empId);
+
+            // Redirect
+            window.location.href = "/dashboard";
+
+        } else {
+            errorBox.innerText = data.message || "Invalid Emp ID";
+        }
+
+    } catch (err) {
+        errorBox.innerText = "Server error. Try again.";
+    }
 }
+
 </script>
 
 </body>

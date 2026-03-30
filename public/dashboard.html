@@ -1,35 +1,116 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Dashboard</title>
+<title>Dashboard</title>
+<style>
+.card {display:inline-block;margin:5px;padding:10px;background:#1f6fb2;color:#fff}
+</style>
 </head>
+
 <body>
 
 <h2>Dashboard</h2>
 
-<input type="file" id="file">
-<button onclick="upload()">Upload</button>
+<div>
+<span class="card">Total: <span id="t"></span></span>
+<span class="card">SSS Done: <span id="sd"></span></span>
+<span class="card">SSS Pending: <span id="sp"></span></span>
+<span class="card">AWS Done: <span id="ad"></span></span>
+<span class="card">AWS Pending: <span id="ap"></span></span>
+</div>
+
+<input id="search" placeholder="Search..." onkeyup="filterData()">
+
+<table border="1">
+<thead>
+<tr>
+<th>State</th>
+<th>BM HQ</th>
+<th>Code</th>
+<th>Name</th>
+<th>Value</th>
+<th>SSS</th>
+<th>AWS</th>
+</tr>
+</thead>
+<tbody id="body"></tbody>
+</table>
 
 <script>
-async function upload() {
-  const file = document.getElementById("file").files[0];
+let all=[], uploads={};
 
-  if (!file) {
-    alert("Select file");
-    return;
-  }
-
-  const formData = new FormData();
-  formData.append("file", file);
-
-  const res = await fetch("/upload", {
-    method: "POST",
-    body: formData
-  });
-
-  const data = await res.json();
-  alert(data.message);
+async function load(){
+ const r=await fetch('/getData');
+ const d=await r.json();
+ all=d.rows; uploads=d.uploads||{};
+ render(all); cards();
 }
+
+function render(data){
+ let h='';
+ data.forEach(r=>{
+  const s=r.Code+"_SSS", a=r.Code+"_AWS";
+  h+=`<tr>
+  <td>${r.STATE}</td>
+  <td>${r.BM_HQ}</td>
+  <td>${r.Code}</td>
+  <td>${r["Stockist Name"]}</td>
+  <td><input id="v_${r.Code}"></td>
+  <td>${cell(r,s,'SSS')}</td>
+  <td>${cell(r,a,'AWS')}</td>
+  </tr>`;
+ });
+ document.getElementById("body").innerHTML=h;
+}
+
+function cell(r,key,type){
+ const role=localStorage.role;
+ if(uploads[key]){
+  return `<a href="${uploads[key].links[0]}" target="_blank">View</a>
+  ${role==='admin'?`<button onclick="del('${key}')">Delete</button>`:''}`;
+ }
+ if(role!=='admin') return '-';
+ return `<input type="file" multiple id="f_${key}">
+ <button onclick="up('${r.Code}','${r.STATE}','${r["Stockist Name"]}','${type}','${key}')">Upload</button>`;
+}
+
+async function up(c,s,n,t,k){
+ const files=document.getElementById("f_"+k).files;
+ const v=document.getElementById("v_"+c).value;
+ if(!v)return alert("Value mandatory");
+ const fd=new FormData();
+ for(let f of files)fd.append("files",f);
+ fd.append("code",c);fd.append("state",s);fd.append("name",n);
+ fd.append("type",t);fd.append("value",v);
+ fd.append("empId",localStorage.empId);
+ const r=await fetch('/upload',{method:'POST',body:fd});
+ alert((await r.json()).message); load();
+}
+
+async function del(k){
+ await fetch('/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})});
+ load();
+}
+
+function filterData(){
+ const v=search.value.toLowerCase();
+ render(all.filter(r=>JSON.stringify(r).toLowerCase().includes(v)));
+}
+
+function cards(){
+ let t=all.length,sd=0,ad=0;
+ Object.keys(uploads).forEach(k=>{
+  if(k.includes("SSS"))sd++; else ad++;
+ });
+ t&&(sp=t-sd,ap=t-ad);
+ document.getElementById("t").innerText=t;
+ document.getElementById("sd").innerText=sd;
+ document.getElementById("sp").innerText=sp;
+ document.getElementById("ad").innerText=ad;
+ document.getElementById("ap").innerText=ap;
+}
+
+load();
 </script>
 
 </body>
