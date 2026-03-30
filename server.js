@@ -1,93 +1,113 @@
 require("dotenv").config();
 const express = require("express");
-const session = require("express-session");
 const multer = require("multer");
 const { google } = require("googleapis");
 const fs = require("fs");
 const path = require("path");
+const xlsx = require("xlsx");
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// SESSION
-app.use(
-  session({
-    secret: "secret123",
-    resave: false,
-    saveUninitialized: true,
-  })
+// ================= GOOGLE AUTH (YOUR ACCOUNT) =================
+
+const oauth2Client = new google.auth.OAuth2(
+  process.env.CLIENT_ID,
+  process.env.CLIENT_SECRET,
+  process.env.REDIRECT_URI
 );
 
-// ================= GOOGLE AUTH =================
+// Load saved token
+if (fs.existsSync("token.json")) {
+  oauth2Client.setCredentials(JSON.parse(fs.readFileSync("token.json")));
+}
 
-const auth = new google.auth.GoogleAuth({
-  credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
-  scopes: ["https://www.googleapis.com/auth/drive"],
-});
-
-const drive = google.drive({ version: "v3", auth });
+const drive = google.drive({ version: "v3", auth: oauth2Client });
 
 // ================= MULTER =================
-
 const upload = multer({ dest: "uploads/" });
 
-// ================= TEST ROUTE =================
+// ================= READ EXCEL =================
+async function getExcelData() {
+  const response = await drive.files.export(
+    {
+      fileId: process.env.EXCEL_FILE_ID,
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    },
+    { responseType: "arraybuffer" }
+  );
 
-app.get("/", (req, res) => {
-  res.send(`
-    <h2>Simple Upload Test</h2>
-    <form action="/upload" method="post" enctype="multipart/form-data">
-      <input type="file" name="file" required />
-      <button type="submit">Upload</button>
-    </form>
-  `);
-});
+  const workbook = xlsx.read(response.data, { type: "buffer" });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  return xlsx.utils.sheet_to_json(sheet);
+}
 
-// ================= UPLOAD ROUTE =================
-
-app.post("/upload", upload.single("file"), async (req, res) => {
+// ================= LOGIN =================
+app.post("/login", async (req, res) => {
   try {
-    if (!req.file) {
-      return res.send("No file selected");
+    const { empId } = req.body;
+
+    const data = await getExcelData();
+
+    const user = data.find(
+      (row) => String(row["Emp ID"]).trim() === String(empId).trim()
+    );
+
+    if (!user) {
+      return res.json({ success: false, message: "Invalid Emp ID ❌" });
     }
 
-    console.log("📂 File received:", req.file.originalname);
+    // ROLE LOGIC
+    let role = "user";
+    if (empId === "admin") role = "admin";
 
-    const folderId = process.env.GOOGLE_FOLDER_ID;
+    res.json({ success: true, role });
 
-    // FILE METADATA
-    const fileMetadata = {
-      name: req.file.originalname,
-      parents: [folderId],
-    };
-
-    // MEDIA
-    const media = {
-      mimeType: req.file.mimetype,
-      body: fs.createReadStream(req.file.path),
-    };
-
-    // UPLOAD TO DRIVE
-    const response = await drive.files.create({
-      resource: fileMetadata,
-      media: media,
-      fields: "id",
-    });
-
-    console.log("✅ Uploaded File ID:", response.data.id);
-
-    // DELETE LOCAL FILE
-    fs.unlinkSync(req.file.path);
-
-    res.send("✅ Upload Success");
   } catch (err) {
-    console.error("❌ Upload Error:", err.message);
-    res.send("❌ Upload Failed");
+    console.error(err);
+    res.json({ success: false, message: "Login Error ❌" });
   }
 });
 
-// ================= START =================
+// ================= UPLOAD =================
+app.post("/upload", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.json({ message: "No file ❌" });
 
+    const response = await drive.files.create({
+      requestBody: {
+        name: req.file.originalname,
+        parents: [process.env.FOLDER_ID],
+      },
+      media: {
+        mimeType: req.file.mimetype,
+        body: fs.createReadStream(req.file.path),
+      },
+    });
+
+    fs.unlinkSync(req.file.path);
+
+    res.json({ message: "Upload Success ✅" });
+
+  } catch (err) {
+    console.error(err);
+    res.json({ message: "Upload Failed ❌" });
+  }
+});
+
+// ================= STATIC =================
+app.use(express.static(path.join(__dirname, "public")));
+
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "login.html"));
+});
+
+app.get("/dashboard", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "dashboard.html"));
+});
+
+// ================= START =================
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log("🚀 Running on", PORT));

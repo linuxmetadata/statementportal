@@ -2,158 +2,34 @@
 <html>
 <head>
   <title>Dashboard</title>
-  <style>
-    body { font-family: Arial; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 8px; border: 1px solid #ccc; text-align: left; }
-    input { width: 120px; }
-    button { padding: 4px 8px; }
-  </style>
 </head>
-
 <body>
 
 <h2>Dashboard</h2>
 
-<input id="search" placeholder="Search..." onkeyup="filterData()" />
-
-<br><br>
-
-<table>
-  <thead>
-    <tr>
-      <th>State</th>
-      <th>Code</th>
-      <th>Name</th>
-      <th>Value</th>
-      <th>SSS</th>
-      <th>AWS</th>
-    </tr>
-  </thead>
-  <tbody id="tableBody"></tbody>
-</table>
+<input type="file" id="file">
+<button onclick="upload()">Upload</button>
 
 <script>
+async function upload() {
+  const file = document.getElementById("file").files[0];
 
-let allData = [];
-
-// ================= LOAD DATA =================
-async function loadData() {
-  const res = await fetch('/getData');
-  const data = await res.json();
-  allData = data.rows;
-  render(allData);
-}
-
-// ================= RENDER =================
-function render(rows) {
-  const body = document.getElementById('tableBody');
-  body.innerHTML = '';
-
-  rows.forEach(row => {
-
-    const tr = document.createElement('tr');
-
-    tr.dataset.code = row.Code;
-    tr.dataset.name = row["Stockist Name"];
-    tr.dataset.state = row.STATE;
-
-    tr.innerHTML = `
-      <td>${row.STATE}</td>
-      <td>${row.Code}</td>
-      <td>${row["Stockist Name"]}</td>
-
-      <td>
-        <input class="valueInput" placeholder="Value" />
-      </td>
-
-      <td>
-        <input type="file" multiple class="sssFile">
-        <button onclick="uploadFile(this, 'SSS')">Upload</button>
-      </td>
-
-      <td>
-        <input type="file" multiple class="awsFile">
-        <button onclick="uploadFile(this, 'AWS')">Upload</button>
-      </td>
-    `;
-
-    body.appendChild(tr);
-  });
-}
-
-// ================= SEARCH =================
-function filterData() {
-  const val = document.getElementById('search').value.toLowerCase();
-
-  const filtered = allData.filter(r =>
-    r.STATE.toLowerCase().includes(val) ||
-    r.Code.toLowerCase().includes(val) ||
-    r["Stockist Name"].toLowerCase().includes(val)
-  );
-
-  render(filtered);
-}
-
-// ================= UPLOAD =================
-async function uploadFile(btn, type) {
-  const row = btn.closest('tr');
-
-  let fileInput;
-
-  if (type === 'SSS') {
-    fileInput = row.querySelector('.sssFile');
-  } else {
-    fileInput = row.querySelector('.awsFile');
-  }
-
-  const files = fileInput.files;
-  const value = row.querySelector('.valueInput').value;
-
-  if (!files.length) {
-    alert("Select file ❗");
-    return;
-  }
-
-  if (!value) {
-    alert("Enter value ❗");
+  if (!file) {
+    alert("Select file");
     return;
   }
 
   const formData = new FormData();
+  formData.append("file", file);
 
-  for (let f of files) {
-    formData.append("files", f);
-  }
+  const res = await fetch("/upload", {
+    method: "POST",
+    body: formData
+  });
 
-  formData.append("code", row.dataset.code);
-  formData.append("name", row.dataset.name);
-  formData.append("state", row.dataset.state);
-  formData.append("type", type);
-  formData.append("value", value);
-
-  try {
-    const res = await fetch('/upload', {
-      method: 'POST',
-      body: formData
-    });
-
-    const data = await res.json();
-
-    alert(data.message);
-
-    if (data.message.includes("Success")) {
-      fileInput.value = ""; // reset file
-    }
-
-  } catch (err) {
-    alert("Upload Failed ❌");
-  }
+  const data = await res.json();
+  alert(data.message);
 }
-
-// ================= INIT =================
-loadData();
-
 </script>
 
 </body>

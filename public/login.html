@@ -1,108 +1,39 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Login</title>
-    <style>
-        body {
-            font-family: Arial;
-            display:flex;
-            justify-content:center;
-            align-items:center;
-            height:100vh;
-            background:#f5f5f5;
-        }
-
-        .box {
-            padding:30px;
-            border:1px solid #ccc;
-            border-radius:10px;
-            background:#fff;
-            width:250px;
-        }
-
-        input, select {
-            display:block;
-            margin:10px 0;
-            padding:8px;
-            width:100%;
-        }
-
-        button {
-            padding:8px;
-            background:#1f6fb2;
-            color:#fff;
-            border:none;
-            width:100%;
-            cursor:pointer;
-        }
-    </style>
+  <title>Login</title>
 </head>
-
 <body>
 
-<div class="box">
-    <h3>Login</h3>
+<h2>Login with Emp ID</h2>
 
-    <select id="role" onchange="toggleFields()">
-        <option value="user">User Login</option>
-        <option value="admin">Admin Login</option>
-    </select>
-
-    <!-- USER -->
-    <input type="text" id="email" placeholder="Enter Email">
-
-    <!-- ADMIN -->
-    <input type="text" id="adminUser" placeholder="Admin User ID" style="display:none;">
-    <input type="password" id="adminPass" placeholder="Password" style="display:none;">
-
-    <button onclick="login()">Login</button>
-</div>
+<input id="empId" placeholder="Enter Emp ID">
+<button onclick="login()">Login</button>
 
 <script>
+async function login() {
+  const empId = document.getElementById("empId").value;
 
-function toggleFields() {
-    const role = document.getElementById('role').value;
+  if (!empId) {
+    alert("Enter Emp ID");
+    return;
+  }
 
-    if (role === 'admin') {
-        document.getElementById('email').style.display = 'none';
-        document.getElementById('adminUser').style.display = 'block';
-        document.getElementById('adminPass').style.display = 'block';
-    } else {
-        document.getElementById('email').style.display = 'block';
-        document.getElementById('adminUser').style.display = 'none';
-        document.getElementById('adminPass').style.display = 'none';
-    }
+  const res = await fetch("/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ empId })
+  });
+
+  const data = await res.json();
+
+  if (data.success) {
+    localStorage.setItem("role", data.role);
+    window.location.href = "/dashboard";
+  } else {
+    alert(data.message);
+  }
 }
-
-function login() {
-    const role = document.getElementById('role').value;
-
-    if (role === 'admin') {
-        const user = document.getElementById('adminUser').value;
-        const pass = document.getElementById('adminPass').value;
-
-        if (user === 'admin' && pass === 'admin123') {
-            localStorage.setItem("role", "admin");
-            localStorage.setItem("user", user);
-            window.location.href = "/dashboard";
-        } else {
-            alert("Invalid Admin Credentials");
-        }
-
-    } else {
-        const email = document.getElementById('email').value;
-
-        if (!email) {
-            alert("Enter Email");
-            return;
-        }
-
-        localStorage.setItem("role", "user");
-        localStorage.setItem("user", email);
-        window.location.href = "/dashboard";
-    }
-}
-
 </script>
 
 </body>
