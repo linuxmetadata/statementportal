@@ -1,44 +1,49 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Dashboard</title>
+<title>Dashboard</title>
 
-    <style>
-        body { font-family: Arial; padding:20px; }
+<style>
+body { font-family: Arial; padding:20px; background:#f5f5f5; }
 
-        .top { display:flex; justify-content:space-between; }
+.top { display:flex; justify-content:space-between; }
 
-        .cards { display:flex; gap:10px; margin:10px 0; flex-wrap:wrap; }
+.cards { display:flex; gap:10px; margin:15px 0; }
 
-        .card {
-            padding:10px;
-            background:#1f6fb2;
-            color:white;
-            cursor:pointer;
-            border-radius:5px;
-        }
+.card {
+    background:#1f6fb2;
+    color:white;
+    padding:10px;
+    border-radius:6px;
+    cursor:pointer;
+}
 
-        table {
-            width:100%;
-            border-collapse: collapse;
-        }
+.search { margin-bottom:10px; }
+.search input { padding:6px; margin-right:5px; }
 
-        th, td {
-            border:1px solid #ccc;
-            padding:8px;
-        }
+table {
+    width:100%;
+    border-collapse: collapse;
+    background:white;
+}
 
-        th {
-            background:#1f6fb2;
-            color:white;
-        }
+th {
+    background:#1f6fb2;
+    color:white;
+    padding:8px;
+}
 
-        input { width:90%; padding:5px; }
+td {
+    padding:6px;
+    border-bottom:1px solid #ddd;
+}
 
-        .search input {
-            width:95%;
-        }
-    </style>
+button {
+    padding:4px 6px;
+    margin:2px;
+    cursor:pointer;
+}
+</style>
 </head>
 
 <body>
@@ -48,26 +53,19 @@
     <button onclick="logout()">Logout</button>
 </div>
 
-<div id="loading">Loading data...</div>
-
-<!-- 🔍 SEARCH -->
-<table>
-<tr class="search">
-    <td><input id="s1" placeholder="State"></td>
-    <td><input id="s2" placeholder="BM HQ"></td>
-    <td><input id="s3" placeholder="Code"></td>
-    <td><input id="s4" placeholder="Name"></td>
-    <td colspan="3"></td>
-</tr>
-</table>
-
-<!-- 📊 CARDS -->
+<!-- CARDS -->
 <div class="cards">
-    <div class="card" onclick="filterData('all')">Total <span id="total"></span></div>
-    <div class="card" onclick="filterData('sss_done')">SSS Done <span id="sss_done"></span></div>
-    <div class="card" onclick="filterData('sss_pending')">SSS Pending <span id="sss_pending"></span></div>
-    <div class="card" onclick="filterData('aws_done')">AWS Done <span id="aws_done"></span></div>
-    <div class="card" onclick="filterData('aws_pending')">AWS Pending <span id="aws_pending"></span></div>
+    <div class="card" onclick="filterType('all')">Total: <span id="total"></span></div>
+    <div class="card" onclick="filterType('sss_pending')">SSS Pending: <span id="sss_p"></span></div>
+    <div class="card" onclick="filterType('aws_pending')">AWS Pending: <span id="aws_p"></span></div>
+</div>
+
+<!-- SEARCH -->
+<div class="search">
+    <input id="s1" placeholder="State">
+    <input id="s2" placeholder="BM HQ">
+    <input id="s3" placeholder="Code">
+    <input id="s4" placeholder="Name">
 </div>
 
 <table>
@@ -91,186 +89,167 @@
 const role = localStorage.getItem("role");
 if (!role) window.location.href = "/";
 
-let originalData = [];
-let filteredData = [];
-let uploadedData = {};
+let allData = [];
+let displayData = [];
 let values = {};
+let uploads = {};
+let page = 0;
+const PAGE_SIZE = 50;
 
-function logout(){
-    localStorage.clear();
-    window.location.href = "/";
-}
-
-// 🚀 LOAD DATA
+// 🚀 LOAD DATA (FAST)
 async function loadData(){
-    document.getElementById("loading").style.display = "block";
-
     const res = await fetch('/getData');
     const data = await res.json();
 
-    originalData = data.rows || [];
-    filteredData = [...originalData];
-
-    document.getElementById("loading").style.display = "none";
+    allData = data.rows || [];
+    displayData = [...allData];
 
     updateCards();
-    renderTable();
+    renderPage();
 }
 
-// 📊 CARDS
-function updateCards(){
-    let total = originalData.length;
-    let sssDone = Object.keys(uploadedData).filter(k=>k.includes('SSS')).length;
-    let awsDone = Object.keys(uploadedData).filter(k=>k.includes('AWS')).length;
-
-    document.getElementById("total").innerText = total;
-    document.getElementById("sss_done").innerText = sssDone;
-    document.getElementById("sss_pending").innerText = total - sssDone;
-    document.getElementById("aws_done").innerText = awsDone;
-    document.getElementById("aws_pending").innerText = total - awsDone;
-}
-
-// 🎯 FILTER
-function filterData(type){
-    if(type==='all') filteredData = [...originalData];
-
-    if(type==='sss_done')
-        filteredData = originalData.filter(r=>uploadedData[r.Code+"_SSS"]);
-
-    if(type==='sss_pending')
-        filteredData = originalData.filter(r=>!uploadedData[r.Code+"_SSS"]);
-
-    if(type==='aws_done')
-        filteredData = originalData.filter(r=>uploadedData[r.Code+"_AWS"]);
-
-    if(type==='aws_pending')
-        filteredData = originalData.filter(r=>!uploadedData[r.Code+"_AWS"]);
-
-    renderTable();
-}
-
-// 🔍 SEARCH
-document.querySelectorAll('.search input').forEach(i=>{
-    i.addEventListener('input', applySearch);
-});
-
-function applySearch(){
-    const s1 = document.getElementById('s1').value.toLowerCase();
-    const s2 = document.getElementById('s2').value.toLowerCase();
-    const s3 = document.getElementById('s3').value.toLowerCase();
-    const s4 = document.getElementById('s4').value.toLowerCase();
-
-    filteredData = originalData.filter(r =>
-        (r.STATE||'').toLowerCase().includes(s1) &&
-        (r.BM_HQ||'').toLowerCase().includes(s2) &&
-        (r.Code||'').toLowerCase().includes(s3) &&
-        (r["Stockist Name"]||'').toLowerCase().includes(s4)
-    );
-
-    renderTable();
-}
-
-// 🧾 TABLE
-function renderTable(){
+// 📄 PAGINATION
+function renderPage(){
     const table = document.getElementById("tableBody");
+
+    const start = page * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+    const rows = displayData.slice(start, end);
+
     table.innerHTML = "";
 
-    filteredData.forEach(row=>{
+    rows.forEach(r => {
 
-        const code = row.Code;
-        const keySSS = code+"_SSS";
-        const keyAWS = code+"_AWS";
+        const code = r.Code;
 
         table.innerHTML += `
         <tr>
-            <td>${row.STATE}</td>
-            <td>${row.BM_HQ}</td>
+            <td>${r.STATE}</td>
+            <td>${r.BM_HQ}</td>
             <td>${code}</td>
-            <td>${row["Stockist Name"]}</td>
+            <td>${r["Stockist Name"]}</td>
 
             <td>
                 <input value="${values[code]||''}" 
-                    onchange="values['${code}']=this.value">
+                onchange="values['${code}']=this.value">
             </td>
 
-            <td>${renderCell(code,'SSS')}</td>
-            <td>${renderCell(code,'AWS')}</td>
+            <td>${cell(code,'SSS')}</td>
+            <td>${cell(code,'AWS')}</td>
         </tr>
         `;
     });
 }
 
-// 📦 CELL
-function renderCell(code,type){
-
+// 📦 CELL UI
+function cell(code,type){
     const key = code+"_"+type;
 
-    if(uploadedData[key]){
+    if(uploads[key]){
         return `
-            <button onclick="viewFile()">View</button>
-            ${role==='admin'?`<button onclick="deleteFile('${key}')">Delete</button>`:''}
+        <button onclick="view()">View</button>
+        ${role==='admin'?`<button onclick="remove('${key}')">Delete</button>`:''}
         `;
     }
 
     if(role!=='admin') return '-';
 
     return `
-        <input type="file" multiple onchange="selectFiles(event,'${code}','${type}')">
-        <div id="btn_${key}"></div>
+    <input type="file" multiple onchange="selectFile(event,'${code}','${type}')">
+    <button onclick="upload('${code}','${type}')">Upload</button>
     `;
 }
 
 // 📂 SELECT
-function selectFiles(e,code,type){
-    const files = e.target.files;
-    const key = code+"_"+type;
-
-    document.getElementById("btn_"+key).innerHTML =
-        `<button onclick="uploadFile('${code}','${type}')">Upload</button>`;
-
-    uploadedData[key]={files};
+function selectFile(e,code,type){
+    uploads[code+"_"+type] = {files:e.target.files};
 }
 
-// 🚀 UPLOAD
-async function uploadFile(code,type){
+// 🚀 UPLOAD (FIXED)
+async function upload(code,type){
 
     if(!values[code]){
-        alert("Value is mandatory ❗");
+        alert("Enter Value first ❗");
         return;
     }
 
     const key = code+"_"+type;
-    const data = uploadedData[key];
+    const data = uploads[key];
 
-    const formData = new FormData();
-    formData.append('code', code);
-    formData.append('type', type);
-
-    for(let f of data.files){
-        formData.append('files', f);
+    if(!data || !data.files){
+        alert("Select file first ❗");
+        return;
     }
 
-    const res = await fetch('/upload',{method:'POST',body:formData});
-    const result = await res.json();
+    const form = new FormData();
+    form.append('code', code);
+    form.append('type', type);
 
-    alert(result.message);
+    for(let f of data.files){
+        form.append('files', f);
+    }
 
-    uploadedData[key]={done:true};
+    try{
+        const res = await fetch('/upload',{method:'POST',body:form});
+        const r = await res.json();
 
-    updateCards();
-    renderTable();
-}
+        alert(r.message);
+        uploads[key] = {done:true};
 
-// 👁 VIEW
-function viewFile(){
-    alert("File link integration next step");
+        updateCards();
+        renderPage();
+
+    }catch(e){
+        alert("Upload error ❌");
+    }
 }
 
 // ❌ DELETE
-function deleteFile(key){
-    delete uploadedData[key];
+function remove(key){
+    delete uploads[key];
     updateCards();
-    renderTable();
+    renderPage();
+}
+
+// 👁 VIEW
+function view(){
+    alert("View link next step");
+}
+
+// 📊 CARDS
+function updateCards(){
+    document.getElementById("total").innerText = allData.length;
+    document.getElementById("sss_p").innerText =
+        allData.length - Object.keys(uploads).filter(k=>k.includes('SSS')).length;
+
+    document.getElementById("aws_p").innerText =
+        allData.length - Object.keys(uploads).filter(k=>k.includes('AWS')).length;
+}
+
+// 🔍 SEARCH
+document.querySelectorAll('.search input').forEach(i=>{
+    i.addEventListener('input', ()=>{
+        const s1 = document.getElementById('s1').value.toLowerCase();
+        const s2 = document.getElementById('s2').value.toLowerCase();
+        const s3 = document.getElementById('s3').value.toLowerCase();
+        const s4 = document.getElementById('s4').value.toLowerCase();
+
+        displayData = allData.filter(r =>
+            (r.STATE||'').toLowerCase().includes(s1) &&
+            (r.BM_HQ||'').toLowerCase().includes(s2) &&
+            (r.Code||'').toLowerCase().includes(s3) &&
+            (r["Stockist Name"]||'').toLowerCase().includes(s4)
+        );
+
+        page = 0;
+        renderPage();
+    });
+});
+
+// 🚪 LOGOUT
+function logout(){
+    localStorage.clear();
+    window.location.href = "/";
 }
 
 // INIT
