@@ -1,62 +1,148 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Login</title>
-<style>
-body {font-family:Arial;display:flex;justify-content:center;align-items:center;height:100vh;background:#f5f5f5}
-.box{background:#fff;padding:30px;border-radius:8px;width:320px;text-align:center}
-input{width:90%;padding:10px;margin:10px 0}
-button{width:95%;padding:10px;background:#1f6fb2;color:#fff;border:none}
-</style>
+  <title>Statement Portal Login</title>
+
+  <style>
+    body {
+      font-family: Arial;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background: #f5f6fa;
+      margin: 0;
+    }
+
+    .box {
+      background: #fff;
+      padding: 30px;
+      width: 340px;
+      border-radius: 10px;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+      text-align: center;
+    }
+
+    h2 {
+      margin-bottom: 20px;
+    }
+
+    input {
+      width: 90%;
+      padding: 10px;
+      margin: 10px 0;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+    }
+
+    button {
+      width: 95%;
+      padding: 10px;
+      margin-top: 10px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    .user-btn {
+      background: #1f6fb2;
+      color: white;
+    }
+
+    .admin-btn {
+      background: #28a745;
+      color: white;
+    }
+
+    .divider {
+      margin: 20px 0;
+      border-top: 1px solid #ddd;
+    }
+
+    .error {
+      color: red;
+      margin-top: 10px;
+    }
+  </style>
 </head>
 
 <body>
 
 <div class="box">
-<h2>Statement Portal</h2>
 
-<h4>User Login</h4>
-<input type="text" id="empId" placeholder="Enter ID">
-<button onclick="userLogin()">Login</button>
+  <h2>Statement Portal</h2>
 
-<hr>
+  <!-- USER LOGIN -->
+  <h4>User Login</h4>
+  <input type="text" id="empId" placeholder="Enter BH / SM / ZBM / RBM / ABM ID">
+  <button class="user-btn" onclick="userLogin()">Login</button>
 
-<h4>Admin Login</h4>
-<button onclick="adminLogin()">Login with Gmail</button>
+  <div class="divider"></div>
 
-<div id="err" style="color:red"></div>
+  <!-- ADMIN LOGIN -->
+  <h4>Admin Login</h4>
+  <input type="email" id="adminEmail" placeholder="Enter Admin Gmail">
+  <button class="admin-btn" onclick="adminLogin()">Login as Admin</button>
+
+  <div id="error" class="error"></div>
+
 </div>
 
 <script>
 
 async function userLogin(){
 
-    const empId=document.getElementById("empId").value.trim();
+  const empId = document.getElementById("empId").value.trim();
 
-    if(!empId){
-        document.getElementById("err").innerText="Enter ID ❗";
-        return;
-    }
+  if(!empId){
+    showError("Enter Employee ID ❗");
+    return;
+  }
 
-    const res=await fetch("/user-login",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({empId})
-    });
+  const res = await fetch("/user-login", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ empId })
+  });
 
-    const data=await res.json();
+  const data = await res.json();
 
-    if(data.success){
-        localStorage.setItem("role","user");
-        localStorage.setItem("empId",empId);
-        window.location="/dashboard";
-    }else{
-        document.getElementById("err").innerText="Invalid ID ❌";
-    }
+  if(data.success){
+    localStorage.setItem("role","user");
+    localStorage.setItem("empId", empId);
+    window.location = "/dashboard";
+  } else {
+    showError("Invalid ID ❌");
+  }
 }
 
-function adminLogin(){
-    window.location="/auth/google";
+async function adminLogin(){
+
+  const email = document.getElementById("adminEmail").value.trim();
+
+  if(!email){
+    showError("Enter Admin Email ❗");
+    return;
+  }
+
+  const res = await fetch("/admin-login", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ email })
+  });
+
+  const data = await res.json();
+
+  if(data.success){
+    localStorage.setItem("role","admin");
+    window.location = "/dashboard";
+  } else {
+    showError("Not Authorized ❌");
+  }
+}
+
+function showError(msg){
+  document.getElementById("error").innerText = msg;
 }
 
 </script>
