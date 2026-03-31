@@ -19,7 +19,7 @@ app.use(session({
   saveUninitialized: true,
 }));
 
-// ================= GOOGLE SERVICE ACCOUNT =================
+// ================= GOOGLE SERVICE =================
 const serviceKey = JSON.parse(process.env.GOOGLE_SERVICE_KEY);
 
 const auth = new google.auth.GoogleAuth({
@@ -77,12 +77,12 @@ app.get("/auth/google/callback", async (req, res) => {
     res.redirect("/dashboard");
 
   } catch (err) {
-    console.error("OAuth Error:", err);
+    console.error(err);
     res.send("Google Login Failed ❌");
   }
 });
 
-// ================= GET EXCEL DATA =================
+// ================= GET GOOGLE SHEET =================
 async function getExcelData() {
   try {
     console.log("📥 Fetching Google Sheet...");
@@ -94,14 +94,13 @@ async function getExcelData() {
 
     const wb = xlsx.read(res.data, { type: "buffer" });
 
-    // 👉 Change index if your data is in another sheet
     const sheetName = wb.SheetNames[0];
     const sheet = wb.Sheets[sheetName];
 
     const data = xlsx.utils.sheet_to_json(sheet);
 
     console.log("📊 Sheet:", sheetName);
-    console.log("📊 Rows Loaded:", data.length);
+    console.log("📊 Rows:", data.length);
 
     return data;
 
@@ -111,7 +110,7 @@ async function getExcelData() {
   }
 }
 
-// ================= USER LOGIN (ID BASED) =================
+// ================= USER LOGIN =================
 app.post("/user-login", async (req, res) => {
   try {
     const { empId } = req.body;
@@ -126,7 +125,7 @@ app.post("/user-login", async (req, res) => {
       r.ABM_ID?.toString().trim() === empId.trim()
     );
 
-    if (matched.length === 0) {
+    if (!matched.length) {
       return res.json({ success: false });
     }
 
@@ -167,7 +166,7 @@ async function loadData() {
 }
 
 async function saveData(data) {
-  const content = Buffer.from(JSON.stringify(data, null, 2));
+  const content = Buffer.from(JSON.stringify(data));
 
   const list = await drive.files.list({
     q: `name='${DATA_FILE}'`,
