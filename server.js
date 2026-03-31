@@ -10,25 +10,59 @@ const pdfParse = require("pdf-parse");
 
 const app = express();
 
-// ================= SESSION =================
+// ================= BASIC =================
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
 app.use(session({
   secret: "portal_secret",
   resave: false,
   saveUninitialized: true,
 }));
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// ================= SAFE SERVICE ACCOUNT =================
+let serviceKey = null;
 
-// ================= GOOGLE AUTH =================
-const oauth2Client = new google.auth.OAuth2(
-  process.env.CLIENT_ID,
-  process.env.CLIENT_SECRET,
-  process.env.REDIRECT_URI
-);
+try {
+  if (!process.env.GOOGLE_SERVICE_KEY) {
+    console.log("❌ GOOGLE_SERVICE_KEY missing");
+  } else {
+    serviceKey = JSON.parse(process.env.GOOGLE_SERVICE_KEY);
+    console.log("✅ Service Key Loaded");
+  }
+} catch (e) {
+  console.error("❌ SERVICE KEY ERROR:", e.message);
+}
 
-// ================= GOOGLE DRIVE =================
-const drive = google.drive({ version: "v3", auth: oauth2Client });
+const auth = new google.auth.GoogleAuth({
+  credentials: serviceKey,
+  scopes: ["https://www.googleapis.com/auth/drive"],
+});
+
+const drive = google.drive({
+  version: "v3",
+  auth,
+});
+
+// ================= SAFE OAUTH =================
+let oauth2Client;
+
+try {
+  if (!process.env.CLIENT_ID) console.log("❌ CLIENT_ID missing");
+  if (!process.env.CLIENT_SECRET) console.log("❌ CLIENT_SECRET missing");
+  if (!process.env.REDIRECT_URI) console.log("❌ REDIRECT_URI missing");
+
+  oauth2Client = new google.auth.OAuth2(
+    process.env.CLIENT_ID,
+    process.env.CLIENT_SECRET,
+    process.env.REDIRECT_URI
+  );
+
+  console.log("✅ OAuth Ready");
+
+} catch (e) {
+  console.error("❌ OAUTH ERROR:", e.message);
+}
 
 // ================= MULTER =================
 const upload = multer({ dest: "uploads/" });
@@ -39,36 +73,49 @@ const DATA_FILE = "portal_data.json";
 // ================= AUTH =================
 function isAuth(req, res, next) {
   if (req.session.user) return next();
-  return res.redirect("/");
+  res.redirect("/");
 }
 
 function isAdmin(req, res, next) {
   if (req.session.user?.role === "admin") return next();
-  return res.json({ message: "Admin only ❌" });
+  res.json({ message: "Admin only ❌" });
 }
 
-// ================= GOOGLE LOGIN =================
-
-// STEP 1
-app.get("/auth/google", (req, res) => {
-
-  const url = oauth2Client.generateAuthUrl({
-    access_type: "offline",
-    scope: [
-      "https://www.googleapis.com/auth/userinfo.email",
-      "https://www.googleapis.com/auth/drive"
-    ],
+// ================= DEBUG ROUTE =================
+app.get("/test", (req, res) => {
+  res.json({
+    CLIENT_ID: process.env.CLIENT_ID ? "OK" : "MISSING",
+    CLIENT_SECRET: process.env.CLIENT_SECRET ? "OK" : "MISSING",
+    REDIRECT_URI: process.env.REDIRECT_URI,
+    SERVICE_KEY: process.env.GOOGLE_SERVICE_KEY ? "OK" : "MISSING"
   });
-
-  res.redirect(url);
 });
 
-// STEP 2
-app.get("/auth/google/callback", async (req, res) => {
+// ================= GOOGLE LOGIN =================
+app.get("/auth/google", (req, res) => {
+  try {
+    if (!oauth2Client) return res.send("OAuth not initialized ❌");
 
+    const url = oauth2Client.generateAuthUrl({
+      access_type: "offline",
+      scope: ["https://www.googleapis.com/auth/userinfo.email"],
+    });
+
+    res.redirect(url);
+
+  } catch (err) {
+    console.error("AUTH ERROR:", err);
+    res.send("OAuth Error ❌");
+  }
+});
+
+// ================= CALLBACK =================
+app.get("/auth/google/callback", async (req, res) => {
   try {
 
     const { code } = req.query;
+
+    if (!code) return res.send("No code ❌");
 
     const { tokens } = await oauth2Client.getToken(code);
     oauth2Client.setCredentials(tokens);
@@ -81,20 +128,18 @@ app.get("/auth/google/callback", async (req, res) => {
     const userInfo = await oauth2.userinfo.get();
     const email = userInfo.data.email;
 
-    // 🔥 ADMIN CHECK
+    console.log("Admin Login:", email);
+
     if (email !== process.env.ADMIN_EMAIL) {
       return res.send("Not Authorized ❌");
     }
 
-    req.session.user = {
-      role: "admin",
-      email
-    };
+    req.session.user = { role: "admin", email };
 
     res.redirect("/dashboard");
 
   } catch (err) {
-    console.error(err);
+    console.error("CALLBACK ERROR:", err);
     res.send("Google Login Failed ❌");
   }
 });
@@ -102,52 +147,57 @@ app.get("/auth/google/callback", async (req, res) => {
 // ================= USER LOGIN =================
 app.post("/user-login", async (req, res) => {
 
-  const { empId } = req.body;
-  const data = await getExcelData();
+  try {
 
-  const matched = data.filter(r =>
-    r.BH_ID === empId ||
-    r.SM_ID === empId ||
-    r.ZBM_ID === empId ||
-    r.RBM_ID === empId ||
-    r.ABM_ID === empId
-  );
+    const { empId } = req.body;
 
-  if (matched.length === 0) {
-    return res.json({ success: false });
+    const data = await getExcelData();
+
+    const matched = data.filter(r =>
+      r.BH_ID === empId ||
+      r.SM_ID === empId ||
+      r.ZBM_ID === empId ||
+      r.RBM_ID === empId ||
+      r.ABM_ID === empId
+    );
+
+    if (matched.length === 0) {
+      return res.json({ success: false });
+    }
+
+    req.session.user = { empId, role: "user" };
+
+    res.json({ success: true });
+
+  } catch (e) {
+    console.error(e);
+    res.json({ success: false });
   }
-
-  req.session.user = {
-    empId,
-    role: "user"
-  };
-
-  res.json({ success: true });
-});
-
-// ================= LOGOUT =================
-app.get("/logout", (req, res) => {
-  req.session.destroy(() => res.redirect("/"));
 });
 
 // ================= EXCEL =================
 async function getExcelData() {
 
-  const res = await drive.files.export({
-    fileId: process.env.EXCEL_FILE_ID,
-    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  }, { responseType: "arraybuffer" });
-
-  const wb = xlsx.read(res.data, { type: "buffer" });
-  const sheet = wb.Sheets[wb.SheetNames[0]];
-  return xlsx.utils.sheet_to_json(sheet);
-}
-
-// ================= JSON LOAD =================
-async function loadData() {
-
   try {
 
+    const res = await drive.files.export({
+      fileId: process.env.EXCEL_FILE_ID,
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }, { responseType: "arraybuffer" });
+
+    const wb = xlsx.read(res.data, { type: "buffer" });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    return xlsx.utils.sheet_to_json(sheet);
+
+  } catch (e) {
+    console.error("Excel Error:", e.message);
+    return [];
+  }
+}
+
+// ================= JSON =================
+async function loadData() {
+  try {
     const list = await drive.files.list({
       q: `name='${DATA_FILE}'`,
       fields: "files(id)",
@@ -170,7 +220,6 @@ async function loadData() {
   }
 }
 
-// ================= JSON SAVE =================
 async function saveData(data) {
 
   const content = Buffer.from(JSON.stringify(data, null, 2));
@@ -181,14 +230,11 @@ async function saveData(data) {
   });
 
   if (!list.data.files.length) {
-
     await drive.files.create({
       requestBody: { name: DATA_FILE },
       media: { mimeType: "application/json", body: content },
     });
-
   } else {
-
     await drive.files.update({
       fileId: list.data.files[0].id,
       media: { mimeType: "application/json", body: content },
@@ -219,18 +265,6 @@ app.get("/getData", isAuth, async (req, res) => {
   res.json({ rows: filtered, uploads });
 });
 
-// ================= FILE VALIDATION =================
-async function validateFile(file) {
-
-  if (file.mimetype === "application/pdf") {
-    const buffer = fs.readFileSync(file.path);
-    const data = await pdfParse(buffer);
-    return data.text.length > 10;
-  }
-
-  return true;
-}
-
 // ================= UPLOAD =================
 app.post("/upload", isAuth, upload.array("files"), async (req, res) => {
 
@@ -257,11 +291,6 @@ app.post("/upload", isAuth, upload.array("files"), async (req, res) => {
 
     for (let f of req.files) {
 
-      if (!(await validateFile(f))) {
-        fs.unlinkSync(f.path);
-        return res.json({ message: "Invalid file ❌" });
-      }
-
       const up = await drive.files.create({
         requestBody: {
           name: `${name}_${code}_${type}_${Date.now()}`,
@@ -277,12 +306,7 @@ app.post("/upload", isAuth, upload.array("files"), async (req, res) => {
       fs.unlinkSync(f.path);
     }
 
-    data[key] = {
-      value,
-      links,
-      submittedBy: req.session.user.empId || "admin",
-      date: new Date().toLocaleString(),
-    };
+    data[key] = { value, links };
 
     await saveData(data);
 
@@ -292,16 +316,6 @@ app.post("/upload", isAuth, upload.array("files"), async (req, res) => {
     console.error(err);
     res.json({ message: "Upload Failed ❌" });
   }
-});
-
-// ================= DELETE =================
-app.post("/delete", isAuth, isAdmin, async (req, res) => {
-
-  const data = await loadData();
-  delete data[req.body.key];
-  await saveData(data);
-
-  res.json({ message: "Deleted ✅" });
 });
 
 // ================= STATIC =================
@@ -318,5 +332,5 @@ app.get("/dashboard", isAuth, (req, res) => {
 
 // ================= START =================
 app.listen(process.env.PORT || 10000, () => {
-  console.log("🚀 FINAL SERVER RUNNING");
+  console.log("🚀 FINAL SAFE SERVER RUNNING");
 });
