@@ -187,27 +187,43 @@ async function saveData(data) {
 }
 
 // ================= GET DATA =================
-app.get("/getData", isAuth, async (req, res) => {
+async function getExcelData() {
+  try {
+    console.log("📥 Reading Google Sheet (Sheets API)...");
 
-  const excel = await getExcelData();
-  const uploads = await loadData();
+    const sheets = google.sheets({ version: "v4", auth });
 
-  if (req.session.user.role === "admin") {
-    return res.json({ rows: excel, uploads });
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: process.env.EXCEL_FILE_ID,
+      range: "Sheet1", // 👉 change if sheet name different
+    });
+
+    const rows = res.data.values;
+
+    if (!rows || rows.length === 0) {
+      console.log("❌ No data found");
+      return [];
+    }
+
+    const headers = rows[0];
+
+    const data = rows.slice(1).map(row => {
+      let obj = {};
+      headers.forEach((h, i) => {
+        obj[h] = row[i] || "";
+      });
+      return obj;
+    });
+
+    console.log("📊 Rows Loaded:", data.length);
+
+    return data;
+
+  } catch (err) {
+    console.error("❌ Sheets API Error:", err.message);
+    return [];
   }
-
-  const empId = req.session.user.empId;
-
-  const filtered = excel.filter(r =>
-    r.BH_ID?.toString().trim() === empId.trim() ||
-    r.SM_ID?.toString().trim() === empId.trim() ||
-    r.ZBM_ID?.toString().trim() === empId.trim() ||
-    r.RBM_ID?.toString().trim() === empId.trim() ||
-    r.ABM_ID?.toString().trim() === empId.trim()
-  );
-
-  res.json({ rows: filtered, uploads });
-});
+}
 
 // ================= UPLOAD =================
 app.post("/upload", isAuth, upload.array("files"), async (req, res) => {
