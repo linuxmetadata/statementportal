@@ -19,7 +19,7 @@ app.use(session({
   saveUninitialized: true,
 }));
 
-// ================= GOOGLE DRIVE =================
+// ================= GOOGLE SERVICE ACCOUNT =================
 const serviceKey = JSON.parse(process.env.GOOGLE_SERVICE_KEY);
 
 const auth = new google.auth.GoogleAuth({
@@ -43,11 +43,6 @@ const upload = multer({ dest: "uploads/" });
 function isAuth(req, res, next) {
   if (req.session.user) return next();
   res.redirect("/");
-}
-
-function isAdmin(req, res, next) {
-  if (req.session.user?.role === "admin") return next();
-  res.json({ message: "Admin only ❌" });
 }
 
 // ================= GOOGLE LOGIN =================
@@ -82,25 +77,36 @@ app.get("/auth/google/callback", async (req, res) => {
     res.redirect("/dashboard");
 
   } catch (err) {
-    console.error(err);
+    console.error("OAuth Error:", err);
     res.send("Google Login Failed ❌");
   }
 });
 
-// ================= EXCEL READ =================
+// ================= GET EXCEL DATA =================
 async function getExcelData() {
   try {
+    console.log("📥 Fetching Google Sheet...");
+
     const res = await drive.files.export({
       fileId: process.env.EXCEL_FILE_ID,
       mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     }, { responseType: "arraybuffer" });
 
     const wb = xlsx.read(res.data, { type: "buffer" });
-    const sheet = wb.Sheets[wb.SheetNames[0]];
-    return xlsx.utils.sheet_to_json(sheet);
+
+    // 👉 Change index if your data is in another sheet
+    const sheetName = wb.SheetNames[0];
+    const sheet = wb.Sheets[sheetName];
+
+    const data = xlsx.utils.sheet_to_json(sheet);
+
+    console.log("📊 Sheet:", sheetName);
+    console.log("📊 Rows Loaded:", data.length);
+
+    return data;
 
   } catch (e) {
-    console.error("Excel Error:", e.message);
+    console.error("❌ Excel Error:", e.message);
     return [];
   }
 }
@@ -218,7 +224,7 @@ app.post("/upload", isAuth, upload.array("files"), async (req, res) => {
 
     const folder = await drive.files.create({
       requestBody: {
-        name: `${state}_${type}`,
+        name: `${state}/${type}`,
         mimeType: "application/vnd.google-apps.folder",
         parents: [process.env.FOLDER_ID],
       },
